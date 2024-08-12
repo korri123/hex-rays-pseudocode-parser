@@ -1,6 +1,6 @@
 
 import re
-from typing import Optional, List
+from typing import Optional, List, Self, Tuple
 from enum import Enum, auto
 
 C_VOID_TYPE = {'void'}
@@ -85,7 +85,7 @@ class Lexer:
             return self.string()
 
         # Unrecognized character
-        self.error(f"Unexpected character: {char}")
+        raise self.error(f"Unexpected character: {char}")
 
     def identifier(self) -> Token:
         start: int = self.position
@@ -188,8 +188,8 @@ class Lexer:
         self.column = current_column
         return next_token
 
-    def error(self, message: str) -> None:
-        raise Exception(f"Lexer error at line {self.line}, column {self.column}: {message}")
+    def error(self, message: str) -> Exception:
+        return Exception(f"Lexer error at line {self.line}, column {self.column}: {message}")
 
 class ASTNode:
     def __init__(self, begin_pos: int, end_pos: int):
@@ -197,9 +197,9 @@ class ASTNode:
         self.end_pos: int = end_pos
 
 class Program(ASTNode):
-    def __init__(self, declarations, comments, begin_pos: int, end_pos: int):
+    def __init__(self, statements, comments, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
-        self.declarations: List[Declaration] = declarations
+        self.statements: List[Statement] = statements
         self.comments: List[Token] = comments
     
     def __str__(self):
@@ -209,7 +209,7 @@ class Program(ASTNode):
         return self._insert_comments(result)
 
     def _get_declarations_string(self):
-        return '\n\n'.join(str(decl) for decl in self.declarations)
+        return '\n\n'.join(str(decl) for decl in self.statements)
 
     def _insert_comments(self, result):
         lines = result.split('\n')
@@ -249,10 +249,6 @@ class Program(ASTNode):
             comment_index += 1
         return result
 
-class Declaration(ASTNode):
-    def __init__(self, begin_pos: int, end_pos: int):
-        super().__init__(begin_pos, end_pos)
-
 class Statement(ASTNode):
     def __init__(self, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
@@ -262,14 +258,14 @@ class Type(ASTNode):
         super().__init__(begin_pos, end_pos)
         self.name: str = name
         self.specifiers: List[str] = specifiers
-        self.pointer_count: int = pointer_count
+        self.pointer_count: Optional[int] = pointer_count
 
     def __str__(self):
         result = ""
         if len(self.specifiers):
             result += ' '.join(self.specifiers) + ' '
         result += self.name
-        if self.pointer_count > 0:
+        if self.pointer_count:
             result += '*' * self.pointer_count
         return result
 
@@ -291,10 +287,10 @@ class Parameter(ASTNode):
     def __str__(self):
         return f"{self.type} {self.name}"
 
-class FunctionDeclaration(Declaration):
+class FunctionDeclaration(Statement):
     def __init__(self, return_type: Type, name: str, parameters: List[Parameter], body: Optional[CompoundStatement], calling_convention: Optional[str], begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
-        self.return_type: str = return_type
+        self.return_type: Type = return_type
         self.name: str = name
         self.parameters: List[Parameter] = parameters
         self.body: Optional[CompoundStatement] = body
@@ -365,7 +361,7 @@ class BinaryOperation(Operand):
     def __init__(self, left: Operand, operator: Token, right: Operand, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
         self.left: Operand = left
-        self.operator: str = operator
+        self.operator: Token = operator
         self.right: Operand = right
     
     def __str__(self):
@@ -380,7 +376,7 @@ class BinaryOperation(Operand):
         
         return f"{left_str} {self.operator} {right_str}"
 
-    def __needs_parentheses(self, child_op):
+    def __needs_parentheses(self, child_op: Self):
         precedence = {
             '*': 3, '/': 3, '%': 3,
             '+': 2, '-': 2,
@@ -390,8 +386,8 @@ class BinaryOperation(Operand):
             '||': -2
         }
         
-        parent_precedence = precedence.get(self.operator, 0)
-        child_precedence = precedence.get(child_op.operator, 0)
+        parent_precedence = precedence.get(self.operator.value, 0)
+        child_precedence = precedence.get(child_op.operator.value, 0)
         
         if parent_precedence > child_precedence:
             return True
@@ -475,7 +471,7 @@ class FunctionCall(Operand):
         args = ', '.join(str(arg) for arg in self.arguments)
         return f"{self.function}({args})"
 
-class VariableDeclaration(Declaration):
+class VariableDeclaration(Statement):
     def __init__(self, type: Type, name: str, initializer: Optional[Operand], begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
         self.type: Type = type
@@ -536,7 +532,7 @@ class Parser:
     def is_declaration_specifier(self, token: Token) -> bool:
         return (token.type == TokenType.KEYWORD and token.value in C_DECLARATION_SPECIFIERS)
 
-    def parse_type(self) -> str:
+    def parse_type(self) -> Type:
         declaration_specifiers = self.parse_declaration_specifiers()
         _type = self.expect(TokenType.IDENTIFIER)
         pointer_count = 0
@@ -578,22 +574,6 @@ class Parser:
             self.position = position
             self.current_token = current_token
 
-    def is_function_declaration(self) -> bool:
-        position = self.position
-        current_token = self.current_token
-        try:
-            _type = self.parse_type()
-            _name = self.expect(TokenType.IDENTIFIER)
-            if _name.value in MSVC_CALLING_CONVENTIONS:
-                _name = self.expect(TokenType.IDENTIFIER)
-            self.expect(TokenType.OPERATOR, '(')
-            return True
-        except ParserException:
-            return False
-        finally:
-            self.position = position
-            self.current_token = current_token
-
     def parse_statement(self) -> Statement:
         start_pos = self.current_token.position
         
@@ -623,14 +603,37 @@ class Parser:
         self.expect(TokenType.OPERATOR, ';')
         return VariableDeclaration(var_type, var_name.value, initializer, start_pos, self.current_token.position)
 
-    def parse_function_declaration(self) -> FunctionDeclaration:
-        start_pos = self.current_token.position
-        _type = self.parse_type()
+
+    def parse_function_name(self) -> Tuple[Token, Optional[str]]:
         _name = self.expect(TokenType.IDENTIFIER)
         calling_convention = None
         if _name.value in MSVC_CALLING_CONVENTIONS:
             calling_convention = _name.value
             _name = self.expect(TokenType.IDENTIFIER)
+        if self.current_token.type == TokenType.OPERATOR and self.current_token.value == '::':
+            _name.value += '::'
+            self.advance()
+            _name.value += self.expect(TokenType.IDENTIFIER).value
+        return _name, calling_convention
+
+    def is_function_declaration(self) -> bool:
+        position = self.position
+        current_token = self.current_token
+        try:
+            _type = self.parse_type()
+            _name, calling_convention = self.parse_function_name()
+            self.expect(TokenType.OPERATOR, '(')
+            return True
+        except ParserException:
+            return False
+        finally:
+            self.position = position
+            self.current_token = current_token
+
+    def parse_function_declaration(self) -> FunctionDeclaration:
+        start_pos = self.current_token.position
+        _type = self.parse_type()
+        _name, calling_convention = self.parse_function_name()
         self.expect(TokenType.OPERATOR, '(')
         parameters = self.parse_parameters()
         self.expect(TokenType.OPERATOR, ')')
@@ -685,7 +688,7 @@ class Parser:
         start_pos = self.current_token.position
         expr = self.parse_logical_and()
         while self.current_token.type == TokenType.OPERATOR and self.current_token.value == '||':
-            op = self.current_token.value
+            op = self.current_token
             self.advance()
             right = self.parse_logical_and()
             expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
@@ -695,7 +698,7 @@ class Parser:
         start_pos = self.current_token.position
         expr = self.parse_equality()
         while self.current_token.type == TokenType.OPERATOR and self.current_token.value == '&&':
-            op = self.current_token.value
+            op = self.current_token
             self.advance()
             right = self.parse_equality()
             expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
@@ -705,7 +708,7 @@ class Parser:
         start_pos = self.current_token.position
         expr = self.parse_relational()
         while self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['==', '!=']:
-            op = self.current_token.value
+            op = self.current_token
             self.advance()
             right = self.parse_relational()
             expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
@@ -715,7 +718,7 @@ class Parser:
         start_pos = self.current_token.position
         expr = self.parse_additive()
         while self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['<', '>', '<=', '>=']:
-            op = self.current_token.value
+            op = self.current_token
             self.advance()
             right = self.parse_additive()
             expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
@@ -725,7 +728,7 @@ class Parser:
         start_pos = self.current_token.position
         expr = self.parse_multiplicative()
         while self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['+', '-']:
-            op = self.current_token.value
+            op = self.current_token
             self.advance()
             right = self.parse_multiplicative()
             expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
@@ -735,7 +738,7 @@ class Parser:
         start_pos = self.current_token.position
         expr = self.parse_unary()
         while self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['*', '/', '%']:
-            op = self.current_token.value
+            op = self.current_token
             self.advance()
             right = self.parse_unary()
             expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
@@ -744,7 +747,7 @@ class Parser:
     def parse_unary(self) -> Operand:
         start_pos = self.current_token.position
         if self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['-', '!', '*', '&', '~']:
-            op = self.current_token.value
+            op = self.current_token
             self.advance()
             expr = self.parse_unary()
             return UnaryOperation(op, expr, start_pos, self.current_token.position)
@@ -781,7 +784,7 @@ class Parser:
             self.expect(TokenType.OPERATOR, ')')
             return expr
         else:
-            self.error(f"Unexpected token: {self.current_token}")
+            raise self.error(f"Unexpected token: {self.current_token}")
 
     def parse_function_call(self, function_name: str, start_pos: int) -> FunctionCall:
         self.expect(TokenType.OPERATOR, '(')
@@ -792,7 +795,7 @@ class Parser:
                 self.advance()
                 arguments.append(self.parse_expression())
         self.expect(TokenType.OPERATOR, ')')
-        return FunctionCall(Identifier(function_name, start_pos, self.current_token.position), arguments, None, start_pos, self.current_token.position)
+        return FunctionCall(Identifier(function_name, start_pos, self.current_token.position), arguments, start_pos, self.current_token.position)
 
     def advance(self):
         self.current_token = self.lexer.next_token()
@@ -805,18 +808,18 @@ class Parser:
 
     def expect(self, token_type: TokenType, value: Optional[str] = None) -> Token:
         if self.current_token.type != token_type:
-            self.error(f"Expected token type {token_type}, but got {self.current_token.type}")
+            raise self.error(f"Expected token type {token_type}, but got {self.current_token.type}")
         if value is not None and self.current_token.value != value:
-            self.error(f"Expected token value '{value}', but got '{self.current_token.value}'")
+            raise self.error(f"Expected token value '{value}', but got '{self.current_token.value}'")
         token = self.current_token
         self.advance()
         return token
 
     def error(self, message: str):
-        raise ParserException(f"Parser error: {message}")
+        return ParserException(f"Parser error: {message}")
 
 lexer = Lexer("""
-unsigned int main() {
+unsigned int BSAnimGroupSequence::GetAnimGroup(int index) {
     unsigned int a = 5 + 5;
     int b = 10;
     return 0;
