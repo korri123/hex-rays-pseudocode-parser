@@ -19,7 +19,7 @@ C_KEYWORDS = { 'if', 'else', 'while', 'for', 'return', 'static', 'const',
 
 C_OPERATORS = {'+', '-', '*', '/', '=', '<', '>', '!', '&', '|', '^', '~', ';', '->', '++', '--', '+=', '-=', '*=', 
                '/=', '%=', '&=', '|=', '^=', '<<=', '>>=', '==', '!=', '<=', '>=', '&&', '||', '<<', '>>', '%', '?', 
-               ':', '.', ',', '(', ')', '[', ']', '{', '}', '::'}
+               ':', '.', ',', '(', ')', '[', ']', '{', '}'}
 
 class TokenType(Enum):
     KEYWORD = auto()
@@ -28,7 +28,8 @@ class TokenType(Enum):
     OPERATOR = auto()
     PUNCTUATION = auto()
     STRING = auto()
-    COMMENT = auto()
+    LINE_COMMENT = auto()
+    BLOCK_COMMENT = auto()
     EOF = auto()
 
 class Token:
@@ -60,6 +61,12 @@ class Lexer:
             self.advance()
             return self.next_token()
 
+        # Comments
+        if char == '/' and self.peek() == '/':
+            return self.line_comment()
+        if char == '/' and self.peek() == '*':
+            return self.block_comment()
+
         # Identifiers and keywords
         if char.isalpha() or char == '_':
             return self.identifier()
@@ -75,12 +82,6 @@ class Lexer:
         # String literals
         if char in '"\'':
             return self.string()
-
-        # Comments
-        if char == '/' and self.peek() == '/':
-            return self.line_comment()
-        if char == '/' and self.peek() == '*':
-            return self.block_comment()
 
         # Unrecognized character
         self.error(f"Unexpected character: {char}")
@@ -153,7 +154,7 @@ class Lexer:
         while self.position < len(self.code) and self.code[self.position] != '\n':
             self.advance()
         value: str = self.code[start:self.position]
-        return Token(TokenType.COMMENT, value, self.line, self.column - (self.position - start), self.position)
+        return Token(TokenType.LINE_COMMENT, value, self.line, self.column - (self.position - start), self.position)
 
     def block_comment(self) -> Token:
         start: int = self.position
@@ -164,7 +165,7 @@ class Lexer:
             self.error("Unterminated block comment")
         self.advance(2)  # Skip */
         value: str = self.code[start:self.position]
-        return Token(TokenType.COMMENT, value, self.line, self.column - (self.position - start), self.position)
+        return Token(TokenType.BLOCK_COMMENT, value, self.line, self.column - (self.position - start), self.position)
 
     def advance(self, count: int = 1) -> None:
         for _ in range(count):
@@ -198,8 +199,9 @@ class ASTNode:
     pass
 
 class Program(ASTNode):
-    def __init__(self, declarations):
+    def __init__(self, declarations, comments):
         self.declarations: List[Declaration] = declarations
+        self.comments: List[Token] = comments
     
     def __str__(self):
         return '\n\n'.join(str(decl) for decl in self.declarations)
@@ -303,7 +305,35 @@ class BinaryOperation(Operand):
         self.right: Operand = right
     
     def __str__(self):
-        return f"({self.left} {self.operator} {self.right})"
+        left_str = str(self.left)
+        right_str = str(self.right)
+        
+        if isinstance(self.left, BinaryOperation) and self.__needs_parentheses(self.left):
+            left_str = f"({left_str})"
+        
+        if isinstance(self.right, BinaryOperation) and self.__needs_parentheses(self.right):
+            right_str = f"({right_str})"
+        
+        return f"{left_str} {self.operator} {right_str}"
+
+    def __needs_parentheses(self, child_op):
+        precedence = {
+            '*': 3, '/': 3, '%': 3,
+            '+': 2, '-': 2,
+            '<': 1, '>': 1, '<=': 1, '>=': 1,
+            '==': 0, '!=': 0,
+            '&&': -1,
+            '||': -2
+        }
+        
+        parent_precedence = precedence.get(self.operator, 0)
+        child_precedence = precedence.get(child_op.operator, 0)
+        
+        if parent_precedence > child_precedence:
+            return True
+        if parent_precedence == child_precedence and self.operator != child_op.operator:
+            return True
+        return False
 
 class UnaryOperation(Operand):
     def __init__(self, operator: Token, operand: Operand):
@@ -311,7 +341,9 @@ class UnaryOperation(Operand):
         self.operand: Operand = operand
     
     def __str__(self):
-        return f"({self.operator}{self.operand})"
+        if isinstance(self.operand, BinaryOperation):
+            return f"{self.operator}({self.operand})"
+        return f"{self.operator}{self.operand}"
 
 class ArrayAccess(Operand):
     def __init__(self, array: Operand, index: Operand):
@@ -390,7 +422,8 @@ class Parser:
     def __init__(self, lexer: Lexer):
         self.lexer: Lexer = lexer
         self.current_token: Token = self.lexer.next_token()
-        self._rest = self.lexer.code[self.lexer.position:]
+        self._rest: str = self.lexer.code[self.lexer.position:]
+        self.comments: List[Token] = []
 
     @property
     def position(self):
@@ -409,7 +442,7 @@ class Parser:
         declarations = []
         while self.current_token.type != TokenType.EOF:
             declarations.append(self.parse_statement())
-        return Program(declarations)
+        return Program(declarations, self.comments)
 
     def parse_declaration_specifiers(self) -> List[str]:
         specifiers = []
@@ -659,8 +692,12 @@ class Parser:
 
     def advance(self):
         self.current_token = self.lexer.next_token()
+        while self.current_token.type in (TokenType.LINE_COMMENT, TokenType.BLOCK_COMMENT):
+            self.comments.append(self.current_token)
+            self.current_token = self.lexer.next_token()
         self.position = self.current_token.position
         self._rest = self.lexer.code[self.position:]
+
 
     def expect(self, token_type: TokenType, value: Optional[str] = None) -> Token:
         if self.current_token.type != token_type:
@@ -675,7 +712,10 @@ class Parser:
         raise ParserException(f"Parser error: {message}")
 
 lexer = Lexer("""
-int a = 5 + 5;
+void *main() {
+    int a = 5 + 5; // eax
+    return 0;
+}
 """)
 parser = Parser(lexer)
 program = parser.parse()
