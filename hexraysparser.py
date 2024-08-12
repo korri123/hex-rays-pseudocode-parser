@@ -41,7 +41,7 @@ class Token:
         self.position: int = position
     
     def __str__(self):
-        return f"Token(type={self.type}, value={self.value}, line={self.line}, column={self.column}, position={self.position})"
+        return self.value
 
 class Lexer:
     def __init__(self, code: str):
@@ -207,7 +207,25 @@ class Program(ASTNode):
         self.comments: List[Token] = comments
     
     def __str__(self):
-        return '\n\n'.join(str(decl) for decl in self.declarations)
+        result = '\n\n'.join(str(decl) for decl in self.declarations)
+        if len(self.comments) == 0:
+            return result
+        lines = result.split('\n')
+        comment_index = 0
+        for i in range(len(lines)):
+            while comment_index < len(self.comments) and self.comments[comment_index].line <= i + 1:
+                comment = self.comments[comment_index]
+                if comment.type == TokenType.LINE_COMMENT:
+                    lines[i] += f" {comment.value}"
+                elif comment.type == TokenType.BLOCK_COMMENT:
+                    lines[i] += f"\n{comment.value}"
+                comment_index += 1
+        result = '\n'.join(lines)
+        # Add any remaining comments at the end
+        while comment_index < len(self.comments):
+            result += f"\n{self.comments[comment_index].value}"
+            comment_index += 1
+        return result
 
 class Declaration(ASTNode):
     def __init__(self, begin_pos: int, end_pos: int):
