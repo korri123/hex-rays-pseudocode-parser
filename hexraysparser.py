@@ -6,9 +6,7 @@ from enum import Enum, auto
 C_VOID_TYPE = {'void'}
 C_INT_TYPES = {'int', 'char', 'short', 'long', 'long long'}
 C_FLOAT_TYPES = {'float', 'double'}
-
-def is_c_basic_type(type: str) -> bool:
-    return type in C_VOID_TYPE or type in C_INT_TYPES or type in C_FLOAT_TYPES
+MSVC_CALLING_CONVENTIONS = {'__stdcall', '__cdecl', '__fastcall', '__thiscall', '__vectorcall'}
 
 C_DECLARATION_SPECIFIERS = {'static', 'extern', 'auto', 'register', 'const', 'volatile', 'inline', 'unsigned'}
 
@@ -270,16 +268,25 @@ class Parameter(ASTNode):
         return f"{self.type} {self.name}"
 
 class FunctionDeclaration(Declaration):
-    def __init__(self, return_type: Type, name: str, parameters: List[Parameter], body: Optional[CompoundStatement], begin_pos: int, end_pos: int):
+    def __init__(self, return_type: Type, name: str, parameters: List[Parameter], body: Optional[CompoundStatement], calling_convention: Optional[str], begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
         self.return_type: str = return_type
         self.name: str = name
         self.parameters: List[Parameter] = parameters
-        self.body: CompoundStatement = body
+        self.body: Optional[CompoundStatement] = body
+        self.calling_convention: Optional[str] = calling_convention
     
     def __str__(self):
         params = ', '.join(str(param) for param in self.parameters)
-        return f"{self.return_type} {self.name}({params})\n{self.body}"
+        result = str(self.return_type)
+        if self.calling_convention:
+            result += f" {self.calling_convention}"
+        result += f" {self.name}({params})"
+        if self.body:
+            result += f"\n{self.body}"
+        else:
+            result += ";"
+        return result
 
 class Operand(ASTNode):
     def __init__(self, begin_pos: int, end_pos: int):
@@ -543,6 +550,8 @@ class Parser:
         try:
             _type = self.parse_type()
             _name = self.expect(TokenType.IDENTIFIER)
+            if _name.value in MSVC_CALLING_CONVENTIONS:
+                _name = self.expect(TokenType.IDENTIFIER)
             self.expect(TokenType.OPERATOR, '(')
             return True
         except ParserException:
@@ -584,6 +593,10 @@ class Parser:
         start_pos = self.current_token.position
         _type = self.parse_type()
         _name = self.expect(TokenType.IDENTIFIER)
+        calling_convention = None
+        if _name.value in MSVC_CALLING_CONVENTIONS:
+            calling_convention = _name.value
+            _name = self.expect(TokenType.IDENTIFIER)
         self.expect(TokenType.OPERATOR, '(')
         parameters = self.parse_parameters()
         self.expect(TokenType.OPERATOR, ')')
@@ -592,7 +605,7 @@ class Parser:
             self.advance()
         else:
             body = self.parse_compound_statement()
-        return FunctionDeclaration(_type, _name.value, parameters, body, start_pos, self.current_token.position)
+        return FunctionDeclaration(_type, _name.value, parameters, body, calling_convention, start_pos, self.current_token.position)
 
     def parse_if_statement(self) -> IfStatement:
         start_pos = self.current_token.position
@@ -769,7 +782,7 @@ class Parser:
         raise ParserException(f"Parser error: {message}")
 
 lexer = Lexer("""
-void *main() {
+void *__fastcall main() {
     int a = 5 + 5; // eax
     return 0;
 }
