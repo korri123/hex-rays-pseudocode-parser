@@ -196,10 +196,13 @@ class Lexer:
         raise Exception(f"Lexer error at line {self.line}, column {self.column}: {message}")
 
 class ASTNode:
-    pass
+    def __init__(self, begin_pos: int, end_pos: int):
+        self.begin_pos: int = begin_pos
+        self.end_pos: int = end_pos
 
 class Program(ASTNode):
-    def __init__(self, declarations, comments):
+    def __init__(self, declarations, comments, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.declarations: List[Declaration] = declarations
         self.comments: List[Token] = comments
     
@@ -207,13 +210,16 @@ class Program(ASTNode):
         return '\n\n'.join(str(decl) for decl in self.declarations)
 
 class Declaration(ASTNode):
-    pass
+    def __init__(self, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
 
 class Statement(ASTNode):
-    pass
+    def __init__(self, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
 
 class Type(ASTNode):
-    def __init__(self, name: str, specifiers: List[str], pointer_count: Optional[int]):
+    def __init__(self, name: str, specifiers: List[str], pointer_count: Optional[int], begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.name: str = name
         self.specifiers: List[str] = specifiers
         self.pointer_count: int = pointer_count
@@ -228,7 +234,8 @@ class Type(ASTNode):
         return result
 
 class CompoundStatement(Statement):
-    def __init__(self, statements):
+    def __init__(self, statements, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.statements: List[Statement] = statements
     
     def __str__(self):
@@ -236,7 +243,8 @@ class CompoundStatement(Statement):
         return f"{{\n{stmt_strs}\n}}"
 
 class Parameter(ASTNode):
-    def __init__(self, type: Type, name: str):
+    def __init__(self, type: Type, name: str, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.type = type
         self.name = name
     
@@ -244,7 +252,8 @@ class Parameter(ASTNode):
         return f"{self.type} {self.name}"
 
 class FunctionDeclaration(Declaration):
-    def __init__(self, return_type: Type, name: str, parameters: List[Parameter], body: Optional[CompoundStatement]):
+    def __init__(self, return_type: Type, name: str, parameters: List[Parameter], body: Optional[CompoundStatement], begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.return_type: str = return_type
         self.name: str = name
         self.parameters: List[Parameter] = parameters
@@ -255,17 +264,20 @@ class FunctionDeclaration(Declaration):
         return f"{self.return_type} {self.name}({params})\n{self.body}"
 
 class Operand(ASTNode):
-    pass
+    def __init__(self, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
 
 class ExpressionStatement(Statement):
-    def __init__(self, expression: Operand):
+    def __init__(self, expression: Operand, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.expression: Operand = expression
     
     def __str__(self):
         return f"{self.expression};"
 
 class IfStatement(Statement):
-    def __init__(self, condition, then_branch, else_branch=None):
+    def __init__(self, condition: Operand, then_branch: Statement, else_branch: Optional[Statement], begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.condition: Operand = condition
         self.then_branch: Statement = then_branch
         self.else_branch: Optional[Statement] = else_branch
@@ -279,7 +291,8 @@ class IfStatement(Statement):
         return '\n'.join('    ' + line for line in str(stmt).split('\n'))
 
 class WhileStatement(Statement):
-    def __init__(self, condition, body):
+    def __init__(self, condition, body, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.condition: Operand = condition
         self.body: Statement = body
     
@@ -290,7 +303,8 @@ class WhileStatement(Statement):
         return '\n'.join('    ' + line for line in str(stmt).split('\n'))
 
 class ReturnStatement(Statement):
-    def __init__(self, expression):
+    def __init__(self, expression, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.expression: Optional[Operand] = expression
     
     def __str__(self):
@@ -299,7 +313,8 @@ class ReturnStatement(Statement):
         return "return;"
 
 class BinaryOperation(Operand):
-    def __init__(self, left: Operand, operator: Token, right: Operand):
+    def __init__(self, left: Operand, operator: Token, right: Operand, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.left: Operand = left
         self.operator: str = operator
         self.right: Operand = right
@@ -336,7 +351,8 @@ class BinaryOperation(Operand):
         return False
 
 class UnaryOperation(Operand):
-    def __init__(self, operator: Token, operand: Operand):
+    def __init__(self, operator: Token, operand: Operand, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.operator: Token = operator
         self.operand: Operand = operand
     
@@ -346,7 +362,8 @@ class UnaryOperation(Operand):
         return f"{self.operator}{self.operand}"
 
 class ArrayAccess(Operand):
-    def __init__(self, array: Operand, index: Operand):
+    def __init__(self, array: Operand, index: Operand, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.array: Operand = array
         self.index: Operand = index
     
@@ -354,7 +371,8 @@ class ArrayAccess(Operand):
         return f"{self.array}[{self.index}]"
     
 class MemberAccess(Operand):
-    def __init__(self, object: Operand, member: Operand):
+    def __init__(self, object: Operand, member: Operand, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.object: Operand = object
         self.member: Operand = member
     
@@ -362,7 +380,8 @@ class MemberAccess(Operand):
         return f"{self.object}.{self.member}"
     
 class PointerAccess(Operand):
-    def __init__(self, pointer: Operand, member: Operand):
+    def __init__(self, pointer: Operand, member: Operand, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.pointer: Operand = pointer
         self.member: Operand = member
     
@@ -370,7 +389,8 @@ class PointerAccess(Operand):
         return f"{self.pointer}->{self.member}"
 
 class TernaryOperation(Operand):
-    def __init__(self, condition: Operand, true_branch: Operand, false_branch: Operand):
+    def __init__(self, condition: Operand, true_branch: Operand, false_branch: Operand, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.condition: Operand = condition
         self.true_branch: Operand = true_branch
         self.false_branch: Operand = false_branch
@@ -379,24 +399,26 @@ class TernaryOperation(Operand):
         return f"({self.condition} ? {self.true_branch} : {self.false_branch})"
 
 class Literal(Operand):
-    def __init__(self, value: str):
+    def __init__(self, value: str, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.value: str = value
     
     def __str__(self):
         return self.value
 
 class Identifier(Operand):
-    def __init__(self, name: str):
+    def __init__(self, name: str, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.name: str = name
     
     def __str__(self):
         return self.name
 
 class FunctionCall(Operand):
-    def __init__(self, function: Operand, arguments: List[Operand], this_object: Optional[Operand] = None):
+    def __init__(self, function: Operand, arguments: List[Operand], begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.function = function
         self.arguments = arguments
-        self.this_object = this_object
     
     def __str__(self):
         if not len(self.arguments):
@@ -405,7 +427,8 @@ class FunctionCall(Operand):
         return f"{self.function}({args})"
 
 class VariableDeclaration(Declaration):
-    def __init__(self, type: Type, name: str, initializer: Optional[Operand]):
+    def __init__(self, type: Type, name: str, initializer: Optional[Operand], begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
         self.type: Type = type
         self.name: str = name
         self.initializer: Optional[Operand] = initializer
@@ -442,7 +465,7 @@ class Parser:
         declarations = []
         while self.current_token.type != TokenType.EOF:
             declarations.append(self.parse_statement())
-        return Program(declarations, self.comments)
+        return Program(declarations, self.comments, 0, self.position)
 
     def parse_declaration_specifiers(self) -> List[str]:
         specifiers = []
@@ -461,25 +484,26 @@ class Parser:
         while self.current_token.type == TokenType.OPERATOR and self.current_token.value == '*':
             pointer_count += 1
             self.advance()
-        return Type(_type.value, declaration_specifiers, pointer_count)
+        return Type(_type.value, declaration_specifiers, pointer_count, _type.position, self.position)
 
     def parse_parameters(self) -> List[Parameter]:
         parameters = []
         while self.current_token.type != TokenType.OPERATOR or self.current_token.value != ')':
             param_type = self.parse_type()
-            param_name = self.expect(TokenType.IDENTIFIER).value
-            parameters.append(Parameter(param_type, param_name))
+            param_name = self.expect(TokenType.IDENTIFIER)
+            parameters.append(Parameter(param_type, param_name.value, param_type.begin_pos, param_name.position))
             if self.current_token.type == TokenType.OPERATOR and self.current_token.value == ',':
                 self.advance()
         return parameters
 
     def parse_compound_statement(self) -> CompoundStatement:
+        start_pos = self.current_token.position
         self.expect(TokenType.OPERATOR, '{')
         statements = []
         while self.current_token.type != TokenType.OPERATOR or self.current_token.value != '}':
             statements.append(self.parse_statement())
         self.expect(TokenType.OPERATOR, '}')
-        return CompoundStatement(statements)
+        return CompoundStatement(statements, start_pos, self.current_token.position)
     
     def is_variable_declaration(self) -> bool:
         position = self.position
@@ -510,6 +534,7 @@ class Parser:
             self.current_token = current_token
 
     def parse_statement(self) -> Statement:
+        start_pos = self.current_token.position
         if self.current_token.type == TokenType.KEYWORD:
             if self.current_token.value == 'if':
                 return self.parse_if_statement()
@@ -527,18 +552,20 @@ class Parser:
             return self.parse_expression_statement()
 
     def parse_variable_declaration(self) -> VariableDeclaration:
+        start_pos = self.current_token.position
         var_type = self.parse_type()
-        var_name = self.expect(TokenType.IDENTIFIER).value
+        var_name = self.expect(TokenType.IDENTIFIER)
         initializer = None
         if self.current_token.type == TokenType.OPERATOR and self.current_token.value == '=':
             self.advance()
             initializer = self.parse_expression()
         self.expect(TokenType.OPERATOR, ';')
-        return VariableDeclaration(var_type, var_name, initializer)
+        return VariableDeclaration(var_type, var_name.value, initializer, start_pos, self.current_token.position)
 
     def parse_function_declaration(self) -> FunctionDeclaration:
+        start_pos = self.current_token.position
         _type = self.parse_type()
-        _name = self.expect(TokenType.IDENTIFIER).value
+        _name = self.expect(TokenType.IDENTIFIER)
         self.expect(TokenType.OPERATOR, '(')
         parameters = self.parse_parameters()
         self.expect(TokenType.OPERATOR, ')')
@@ -547,9 +574,10 @@ class Parser:
             self.advance()
         else:
             body = self.parse_compound_statement()
-        return FunctionDeclaration(_type, _name, parameters, body)
+        return FunctionDeclaration(_type, _name.value, parameters, body, start_pos, self.current_token.position)
 
     def parse_if_statement(self) -> IfStatement:
+        start_pos = self.current_token.position
         self.expect(TokenType.KEYWORD, 'if')
         self.expect(TokenType.OPERATOR, '(')
         condition = self.parse_expression()
@@ -559,118 +587,129 @@ class Parser:
         if self.current_token.type == TokenType.KEYWORD and self.current_token.value == 'else':
             self.advance()
             else_branch = self.parse_statement()
-        return IfStatement(condition, then_branch, else_branch)
+        return IfStatement(condition, then_branch, else_branch, start_pos, self.current_token.position)
 
     def parse_while_statement(self) -> WhileStatement:
+        start_pos = self.current_token.position
         self.expect(TokenType.KEYWORD, 'while')
         self.expect(TokenType.OPERATOR, '(')
         condition = self.parse_expression()
         self.expect(TokenType.OPERATOR, ')')
         body = self.parse_statement()
-        return WhileStatement(condition, body)
+        return WhileStatement(condition, body, start_pos, self.current_token.position)
 
     def parse_return_statement(self) -> ReturnStatement:
+        start_pos = self.current_token.position
         self.expect(TokenType.KEYWORD, 'return')
         expression = None
         if self.current_token.type != TokenType.OPERATOR or self.current_token.value != ';':
             expression = self.parse_expression()
         self.expect(TokenType.OPERATOR, ';')
-        return ReturnStatement(expression)
+        return ReturnStatement(expression, start_pos, self.current_token.position)
 
     def parse_expression_statement(self) -> ExpressionStatement:
+        start_pos = self.current_token.position
         expression = self.parse_expression()
         self.expect(TokenType.OPERATOR, ';')
-        return ExpressionStatement(expression)
+        return ExpressionStatement(expression, start_pos, self.current_token.position)
 
     def parse_expression(self) -> Operand:
         return self.parse_logical_or()
 
     def parse_logical_or(self) -> Operand:
+        start_pos = self.current_token.position
         expr = self.parse_logical_and()
         while self.current_token.type == TokenType.OPERATOR and self.current_token.value == '||':
             op = self.current_token.value
             self.advance()
             right = self.parse_logical_and()
-            expr = BinaryOperation(expr, op, right)
+            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
         return expr
 
     def parse_logical_and(self) -> Operand:
+        start_pos = self.current_token.position
         expr = self.parse_equality()
         while self.current_token.type == TokenType.OPERATOR and self.current_token.value == '&&':
             op = self.current_token.value
             self.advance()
             right = self.parse_equality()
-            expr = BinaryOperation(expr, op, right)
+            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
         return expr
 
     def parse_equality(self) -> Operand:
+        start_pos = self.current_token.position
         expr = self.parse_relational()
         while self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['==', '!=']:
             op = self.current_token.value
             self.advance()
             right = self.parse_relational()
-            expr = BinaryOperation(expr, op, right)
+            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
         return expr
 
     def parse_relational(self) -> Operand:
+        start_pos = self.current_token.position
         expr = self.parse_additive()
         while self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['<', '>', '<=', '>=']:
             op = self.current_token.value
             self.advance()
             right = self.parse_additive()
-            expr = BinaryOperation(expr, op, right)
+            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
         return expr
 
     def parse_additive(self) -> Operand:
+        start_pos = self.current_token.position
         expr = self.parse_multiplicative()
         while self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['+', '-']:
             op = self.current_token.value
             self.advance()
             right = self.parse_multiplicative()
-            expr = BinaryOperation(expr, op, right)
+            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
         return expr
 
     def parse_multiplicative(self) -> Operand:
+        start_pos = self.current_token.position
         expr = self.parse_unary()
         while self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['*', '/', '%']:
             op = self.current_token.value
             self.advance()
             right = self.parse_unary()
-            expr = BinaryOperation(expr, op, right)
+            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
         return expr
 
     def parse_unary(self) -> Operand:
+        start_pos = self.current_token.position
         if self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['-', '!', '*', '&', '~']:
             op = self.current_token.value
             self.advance()
             expr = self.parse_unary()
-            return UnaryOperation(op, expr)
+            return UnaryOperation(op, expr, start_pos, self.current_token.position)
         return self.parse_primary()
 
     def parse_primary(self) -> Operand:
+        start_pos = self.current_token.position
         if self.current_token.type == TokenType.NUMBER:
             value = self.current_token.value
             self.advance()
-            return Literal(value)
+            return Literal(value, start_pos, self.current_token.position)
         elif self.current_token.type == TokenType.IDENTIFIER:
             name = self.current_token.value
             self.advance()
             if self.current_token.type == TokenType.OPERATOR and self.current_token.value == '(':
-                return self.parse_function_call(name)
+                return self.parse_function_call(name, start_pos)
             if self.current_token.type == TokenType.OPERATOR and self.current_token.value == '[':
                 self.advance()
                 expr = self.parse_expression()
                 self.expect(TokenType.OPERATOR, ']')
-                return expr
+                return ArrayAccess(Identifier(name, start_pos, self.current_token.position), expr, start_pos, self.current_token.position)
             if self.current_token.type == TokenType.OPERATOR and self.current_token.value == '.':
                 self.advance()
                 expr = self.parse_primary()
-                return MemberAccess(Identifier(name), expr)
+                return MemberAccess(Identifier(name, start_pos, self.current_token.position), expr, start_pos, self.current_token.position)
             if self.current_token.type == TokenType.OPERATOR and self.current_token.value == '->':
                 self.advance()
                 expr = self.parse_primary()
-                return PointerAccess(Identifier(name), expr)
-            return Identifier(name)
+                return PointerAccess(Identifier(name, start_pos, self.current_token.position), expr, start_pos, self.current_token.position)
+            return Identifier(name, start_pos, self.current_token.position)
         elif self.current_token.type == TokenType.OPERATOR and self.current_token.value == '(':
             self.advance()
             expr = self.parse_expression()
@@ -679,7 +718,7 @@ class Parser:
         else:
             self.error(f"Unexpected token: {self.current_token}")
 
-    def parse_function_call(self, function_name: str) -> FunctionCall:
+    def parse_function_call(self, function_name: str, start_pos: int) -> FunctionCall:
         self.expect(TokenType.OPERATOR, '(')
         arguments = []
         if self.current_token.type != TokenType.OPERATOR or self.current_token.value != ')':
@@ -688,7 +727,7 @@ class Parser:
                 self.advance()
                 arguments.append(self.parse_expression())
         self.expect(TokenType.OPERATOR, ')')
-        return FunctionCall(Identifier(function_name), arguments)
+        return FunctionCall(Identifier(function_name, start_pos, self.current_token.position), arguments, None, start_pos, self.current_token.position)
 
     def advance(self):
         self.current_token = self.lexer.next_token()
