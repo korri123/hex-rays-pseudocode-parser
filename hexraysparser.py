@@ -15,16 +15,19 @@ C_KEYWORDS = { 'if', 'else', 'while', 'for', 'return', 'static', 'const',
                       'register', 'auto', 'extern', 'sizeof', 'volatile', 'inline', 'restrict', 'alignas', 'alignof', 
                       'static_assert', 'thread_local'}
 
+C_KEYWORDS = C_KEYWORDS | C_DECLARATION_SPECIFIERS
+
 C_OPERATORS = {'+', '-', '*', '/', '=', '<', '>', '!', '&', '|', '^', '~', ';', '->', '++', '--', '+=', '-=', '*=', 
                '/=', '%=', '&=', '|=', '^=', '<<=', '>>=', '==', '!=', '<=', '>=', '&&', '||', '<<', '>>', '%', '?', 
                ':', '.', ',', '(', ')', '[', ']', '{', '}'}
+# Add the '::' operator to the list of C operators since it can be in the function name in pseudocode
+C_OPERATORS = C_OPERATORS | {'::'}
 
 class TokenType(Enum):
     KEYWORD = auto()
     IDENTIFIER = auto()
     NUMBER = auto()
     OPERATOR = auto()
-    PUNCTUATION = auto()
     STRING = auto()
     LINE_COMMENT = auto()
     BLOCK_COMMENT = auto()
@@ -128,11 +131,6 @@ class Lexer:
 
         return Token(TokenType.OPERATOR, current_op, self.line, self.column - len(current_op), self.position)
 
-    def punctuation(self) -> Token:
-        value: str = self.code[self.position]
-        self.advance()
-        return Token(TokenType.PUNCTUATION, value, self.line, self.column - 1, self.position)
-
     def string(self) -> Token:
         start: int = self.position
         quote: str = self.code[self.position]
@@ -205,21 +203,47 @@ class Program(ASTNode):
         self.comments: List[Token] = comments
     
     def __str__(self):
-        result = '\n\n'.join(str(decl) for decl in self.declarations)
-        if len(self.comments) == 0:
+        result = self._get_declarations_string()
+        if not self.comments:
             return result
+        return self._insert_comments(result)
+
+    def _get_declarations_string(self):
+        return '\n\n'.join(str(decl) for decl in self.declarations)
+
+    def _insert_comments(self, result):
         lines = result.split('\n')
         comment_index = 0
-        for i in range(len(lines)):
-            while comment_index < len(self.comments) and self.comments[comment_index].line <= i + 1:
-                comment = self.comments[comment_index]
-                if comment.type == TokenType.LINE_COMMENT:
-                    lines[i] += f" {comment.value}"
-                elif comment.type == TokenType.BLOCK_COMMENT:
-                    lines[i] += f"\n{comment.value}"
-                comment_index += 1
+        for i, line in enumerate(lines):
+            indent, line_parts = self._get_indent_and_parts(line)
+            comment_index = self._process_line_comments(i, line_parts, comment_index)
+            lines[i] = indent + ' '.join(line_parts)
         result = '\n'.join(lines)
-        # Add any remaining comments at the end
+        return self._add_remaining_comments(result, comment_index)
+
+    def _get_indent_and_parts(self, line):
+        line_parts = line.split(' ')
+        indent = ''
+        if line_parts and not line_parts[0]:
+            indent = ' ' * len(line_parts[0])
+            line_parts = line_parts[1:]
+        return indent, line_parts
+
+    def _process_line_comments(self, line_number, line_parts, comment_index):
+        while comment_index < len(self.comments) and self.comments[comment_index].line <= line_number + 1:
+            comment = self.comments[comment_index]
+            if comment.type == TokenType.LINE_COMMENT:
+                line_parts.append(comment.value)
+            elif comment.type == TokenType.BLOCK_COMMENT:
+                self._insert_block_comment(line_parts, comment)
+            comment_index += 1
+        return comment_index
+
+    def _insert_block_comment(self, line_parts, comment):
+        closest_index = min(range(len(line_parts)), key=lambda j: abs(len(' '.join(line_parts[:j])) - comment.column))
+        line_parts.insert(closest_index, comment.value)
+
+    def _add_remaining_comments(self, result, comment_index):
         while comment_index < len(self.comments):
             result += f"\n{self.comments[comment_index].value}"
             comment_index += 1
@@ -482,6 +506,16 @@ class Parser:
         self.lexer.position = value
         self._rest = self.lexer.code[self.lexer.position:]
 
+        removed_comments = []
+        for comment in reversed(self.comments):
+            if value < comment.position:
+                removed_comments.append(comment)
+            else:
+                break
+        for comment in removed_comments:
+            self.comments.remove(comment)
+                
+
     @property
     def _dbg_token(self):
         return (self.current_token.value, self.current_token.type)
@@ -562,13 +596,13 @@ class Parser:
 
     def parse_statement(self) -> Statement:
         start_pos = self.current_token.position
-        if self.current_token.type == TokenType.KEYWORD:
-            if self.current_token.value == 'if':
-                return self.parse_if_statement()
-            elif self.current_token.value == 'while':
-                return self.parse_while_statement()
-            elif self.current_token.value == 'return':
-                return self.parse_return_statement()
+        
+        if self.current_token.value == 'if':
+            return self.parse_if_statement()
+        elif self.current_token.value == 'while':
+            return self.parse_while_statement()
+        elif self.current_token.value == 'return':
+            return self.parse_return_statement()
         elif self.current_token.type == TokenType.OPERATOR and self.current_token.value == '{':
             return self.parse_compound_statement()
         elif self.is_variable_declaration():
@@ -782,8 +816,9 @@ class Parser:
         raise ParserException(f"Parser error: {message}")
 
 lexer = Lexer("""
-void *__fastcall main() {
-    int a = 5 + 5; // eax
+unsigned int main() {
+    unsigned int a = 5 + 5;
+    int b = 10;
     return 0;
 }
 """)
