@@ -227,6 +227,7 @@ class ASTNode(ABC):
     def __init__(self, begin_pos: int, end_pos: int):
         self.begin_pos: int = begin_pos
         self.end_pos: int = end_pos
+        self.parent: Optional[ASTNode] = None
 
     @abstractmethod
     def children(self) -> List['ASTNode']:
@@ -734,7 +735,14 @@ class Parser:
         declarations = []
         while self.current_token.type != TokenType.EOF:
             declarations.append(self.parse_statement())
-        return Program(declarations, self.comments, 0, self.position)
+        program = Program(declarations, self.comments, 0, self.position)
+        self.assign_parents(program)
+        return program
+
+    def assign_parents(self, node: ASTNode):
+        for child in node.children():
+            child.parent = node
+            self.assign_parents(child)
 
     def parse_declaration_specifiers(self) -> List[str]:
         specifiers = []
