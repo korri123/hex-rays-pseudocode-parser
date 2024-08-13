@@ -46,11 +46,17 @@ class Token:
         return self.value
 
 class Lexer:
-    def __init__(self, code: str):
+    def __init__(self, code: str = ""):
         self.code: str = code
         self.position: int = 0
         self.line: int = 1
         self.column: int = 1
+
+    def set_code(self, code: str):
+        self.code = code
+        self.position = 0
+        self.line = 1
+        self.column = 1
 
     def next_token(self) -> Token:
         if self.position >= len(self.code):
@@ -629,8 +635,15 @@ class ParserException(Exception):
     pass
 
 class Parser:
-    def __init__(self, lexer: Lexer = Lexer()):
-        self.lexer: Lexer = lexer
+    def __init__(self, lexer: Optional[Lexer] = None, code: str = ""):
+        if lexer is None:
+            self.lexer = Lexer()
+        else:
+            self.lexer = lexer
+        
+        if code:
+            self.lexer.set_code(code)
+        
         self.current_token: Token = self.lexer.next_token()
         self._rest: str = self.lexer.code[self.lexer.position:]
         self.comments: List[Token] = []
@@ -1043,15 +1056,3 @@ class Parser:
 
     def error(self, message: str):
         return ParserException(f"Parser error: {message}")
-
-lexer = Lexer("""
-void main() {
-    if (true)
-        goto label;
-label:
-    printf("Hello, world!");
-}
-""".strip())
-parser = Parser(lexer)
-program = parser.parse()
-print(program)
