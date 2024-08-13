@@ -22,6 +22,7 @@ C_OPERATORS = {'+', '-', '*', '/', '=', '<', '>', '!', '&', '|', '^', '~', ';', 
                ':', '.', ',', '(', ')', '[', ']', '{', '}'}
 # Add the '::' operator to the list of C operators since it can be in the function name in pseudocode
 C_OPERATORS = C_OPERATORS | {'::'}
+IDA_PSEUDOCODE_OPERATORS = {'LOBYTE', 'HIBYTE', 'WORD', 'DWORD', 'QWORD', 'BYTE'}
 
 class TokenType(Enum):
     KEYWORD = auto()
@@ -502,6 +503,15 @@ class VariableDeclaration(Statement):
             return f"{self.type} {self.name} = {self.initializer};"
         return f"{self.type} {self.name};"
 
+class IDAOperator(Operand):
+    def __init__(self, operator: str, operand: Operand, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
+        self.operator: str = operator
+        self.operand: Operand = operand
+    
+    def __str__(self):
+        return f"{self.operator}({self.operand})"
+
 class ParserException(Exception):
     pass
 
@@ -819,7 +829,14 @@ class Parser:
         start_pos = self.current_token.position
         expr = None
 
-        if self.current_token.type == TokenType.NUMBER:
+        if self.current_token.type == TokenType.IDENTIFIER and self.current_token.value in IDA_PSEUDOCODE_OPERATORS:
+            operator = self.current_token.value
+            self.advance()
+            self.expect(TokenType.OPERATOR, '(')
+            operand = self.parse_expression()
+            self.expect(TokenType.OPERATOR, ')')
+            expr = IDAOperator(operator, operand, start_pos, self.current_token.position)
+        elif self.current_token.type == TokenType.NUMBER:
             value = self.current_token.value
             self.advance()
             expr = Literal(value, start_pos, self.current_token.position)
@@ -891,7 +908,7 @@ class Parser:
         return ParserException(f"Parser error: {message}")
 
 lexer = Lexer("""
-LOBYTE(v6) = 1
+LOBYTE(v6) = 1;
 """.strip())
 parser = Parser(lexer)
 program = parser.parse()
