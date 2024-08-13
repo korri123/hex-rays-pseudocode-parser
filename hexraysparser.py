@@ -99,7 +99,7 @@ class Lexer:
         while peek.type == TokenType.OPERATOR and peek.value == '::':
             self.operator()
             peek = self.peek_next_token()
-            if peek.type != TokenType.IDENTIFIER:
+            if peek.type not in [TokenType.IDENTIFIER, TokenType.NUMBER]:
                 break
             identifier = self.identifier()
             value = f"{value}::{identifier.value}"
@@ -284,7 +284,7 @@ class CompoundStatement(Statement):
         self.statements: List[Statement] = statements
     
     def __str__(self):
-        stmt_strs = '\n'.join('    ' + str(stmt) for stmt in self.statements)
+        stmt_strs = '\n'.join('    ' + str(stmt).replace('\n', '\n    ') for stmt in self.statements)
         return f"{{\n{stmt_strs}\n}}"
 
 class Parameter(ASTNode):
@@ -340,9 +340,11 @@ class IfStatement(Statement):
         if self.else_branch:
             return f"if ({self.condition})\n{self._indent(self.then_branch)}\nelse\n{self._indent(self.else_branch)}"
         return f"if ({self.condition})\n{self._indent(self.then_branch)}"
-
-    def _indent(self, stmt):
-        return '\n'.join('    ' + line for line in str(stmt).split('\n'))
+    
+    def _indent(self, operand: Statement):
+        if isinstance(operand, CompoundStatement):
+            return str(operand)
+        return '\n'.join('    ' + line for line in str(operand).split('\n'))
 
 class WhileStatement(Statement):
     def __init__(self, condition, body, begin_pos: int, end_pos: int):
@@ -351,10 +353,7 @@ class WhileStatement(Statement):
         self.body: Statement = body
     
     def __str__(self):
-        return f"while ({self.condition})\n{self._indent(self.body)}"
-
-    def _indent(self, stmt):
-        return '\n'.join('    ' + line for line in str(stmt).split('\n'))
+        return f"while ({self.condition})\n{self.body}"
 
 class ReturnStatement(Statement):
     def __init__(self, expression, begin_pos: int, end_pos: int):
@@ -478,6 +477,8 @@ class FunctionCall(Operand):
         if not len(self.arguments):
             return f"{self.function}()"
         args = ', '.join(str(arg) for arg in self.arguments)
+        if isinstance(self.function, UnaryOperation):
+            return f"({self.function})({args})"
         return f"{self.function}({args})"
 
 class VariableDeclaration(Statement):
@@ -799,38 +800,45 @@ class Parser:
 
     def parse_primary(self) -> Operand:
         start_pos = self.current_token.position
+        expr = None
+
         if self.current_token.type == TokenType.NUMBER:
             value = self.current_token.value
             self.advance()
-            return Literal(value, start_pos, self.current_token.position)
+            expr = Literal(value, start_pos, self.current_token.position)
         elif self.current_token.type == TokenType.IDENTIFIER:
             name = self.current_token.value
             self.advance()
-            if self.current_token.type == TokenType.OPERATOR and self.current_token.value == '(':
-                return self.parse_function_call(name, start_pos)
-            if self.current_token.type == TokenType.OPERATOR and self.current_token.value == '[':
-                self.advance()
-                expr = self.parse_expression()
-                self.expect(TokenType.OPERATOR, ']')
-                return ArrayAccess(Identifier(name, start_pos, self.current_token.position), expr, start_pos, self.current_token.position)
-            if self.current_token.type == TokenType.OPERATOR and self.current_token.value == '.':
-                self.advance()
-                expr = self.parse_primary()
-                return MemberAccess(Identifier(name, start_pos, self.current_token.position), expr, start_pos, self.current_token.position)
-            if self.current_token.type == TokenType.OPERATOR and self.current_token.value == '->':
-                self.advance()
-                expr = self.parse_primary()
-                return PointerAccess(Identifier(name, start_pos, self.current_token.position), expr, start_pos, self.current_token.position)
-            return Identifier(name, start_pos, self.current_token.position)
+            expr = Identifier(name, start_pos, self.current_token.position)
         elif self.current_token.type == TokenType.OPERATOR and self.current_token.value == '(':
             self.advance()
             expr = self.parse_expression()
             self.expect(TokenType.OPERATOR, ')')
-            return expr
         else:
             raise self.error(f"Unexpected token: {self.current_token}")
 
-    def parse_function_call(self, function_name: str, start_pos: int) -> FunctionCall:
+        while self.current_token.type == TokenType.OPERATOR:
+            if self.current_token.value == '(':
+                expr = self.parse_function_call(expr, start_pos)
+            elif self.current_token.value == '[':
+                self.advance()
+                index = self.parse_expression()
+                self.expect(TokenType.OPERATOR, ']')
+                expr = ArrayAccess(expr, index, start_pos, self.current_token.position)
+            elif self.current_token.value == '.':
+                self.advance()
+                member = self.parse_primary()
+                expr = MemberAccess(expr, member, start_pos, self.current_token.position)
+            elif self.current_token.value == '->':
+                self.advance()
+                member = self.parse_primary()
+                expr = PointerAccess(expr, member, start_pos, self.current_token.position)
+            else:
+                break
+
+        return expr
+
+    def parse_function_call(self, function: Operand, start_pos: int) -> FunctionCall:
         self.expect(TokenType.OPERATOR, '(')
         arguments = []
         if self.current_token.type != TokenType.OPERATOR or self.current_token.value != ')':
@@ -839,7 +847,7 @@ class Parser:
                 self.advance()
                 arguments.append(self.parse_expression())
         self.expect(TokenType.OPERATOR, ')')
-        return FunctionCall(Identifier(function_name, start_pos, self.current_token.position), arguments, start_pos, self.current_token.position)
+        return FunctionCall(function, arguments, start_pos, self.current_token.position)
 
     def advance(self):
         self.current_token = self.lexer.next_token()
@@ -864,10 +872,27 @@ class Parser:
         return ParserException(f"Parser error: {message}")
 
 lexer = Lexer("""
-BSAnimGroupSequence::AnimType GetAnimType(int index) {
-    return BSAnimGroupSequence::AnimType::Get(index);
+BSAnimGroupSequence *__thiscall AnimData::MorphToSequenceIDOrGroup(
+        AnimData *this,
+        unsigned __int16 a2,
+        eAnimSequence a3)
+{
+  int v5; // [esp+Ch] [ebp-Ch]
+  AnimSequenceBase *v6; // [esp+10h] [ebp-8h] BYREF
+  NiAVObject *v7; // [esp+14h] [ebp-4h]
+
+  if ( a2 == 255 || !NiTPointerMap::Lookup(this->pMapAnimSequenceBase, a2, &v6) )
+    return 0;
+  v5 = a3;
+  if ( a3 == -1 )
+    v5 = g_animSequenceTypes[9 * AnimGroupID::GetGroupID(a2)];
+  if ( v5 < 5 || v5 > 6 || (*(v6->__vftable + 3))(v6) )
+    v7 = (*(v6->__vftable + 4))(v6, -1);
+  else
+    v7 = AnimSequenceSingle::48F500(v6, this->animSequence[4], v5);
+  return AnimData::MorphOrBlendToSequence(this, v7, a2, a3);
 }
-""")
+""".strip())
 parser = Parser(lexer)
 program = parser.parse()
 print(program)
