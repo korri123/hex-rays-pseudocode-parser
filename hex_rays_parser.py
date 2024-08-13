@@ -8,20 +8,20 @@ C_INT_TYPES = {'int', 'char', 'short', 'long', 'long long'}
 C_FLOAT_TYPES = {'float', 'double'}
 MSVC_CALLING_CONVENTIONS = {'__stdcall', '__cdecl', '__fastcall', '__thiscall', '__vectorcall'}
 
-C_DECLARATION_SPECIFIERS = {'static', 'extern', 'auto', 'register', 'const', 'volatile', 'inline', 'unsigned'}
+C_DECLARATION_SPECIFIERS = {'static', 'extern', 'auto', 'register', 'const', 'volatile', 'inline', 'unsigned', 'thread_local'}
 
 C_KEYWORDS = { 'if', 'else', 'while', 'for', 'return', 'static', 'const', 
                       'break', 'continue', 'goto', 'case', 'default', 'switch', 'enum', 'typedef', 'struct', 'union', 'volatile', 
                       'register', 'auto', 'extern', 'sizeof', 'volatile', 'inline', 'restrict', 'alignas', 'alignof', 
-                      'static_assert', 'thread_local'}
+                      'static_assert'}
 
-C_KEYWORDS = C_KEYWORDS | C_DECLARATION_SPECIFIERS
+C_KEYWORDS |= C_DECLARATION_SPECIFIERS
 
 C_OPERATORS = {'+', '-', '*', '/', '=', '<', '>', '!', '&', '|', '^', '~', ';', '->', '++', '--', '+=', '-=', '*=', 
                '/=', '%=', '&=', '|=', '^=', '<<=', '>>=', '==', '!=', '<=', '>=', '&&', '||', '<<', '>>', '%', '?', 
                ':', '.', ',', '(', ')', '[', ']', '{', '}'}
 # Add the '::' operator to the list of C operators since it can be in the function name in pseudocode
-C_OPERATORS = C_OPERATORS | {'::'}
+C_OPERATORS |= {'::'}
 IDA_PSEUDOCODE_OPERATORS = {'LOBYTE', 'HIBYTE', 'WORD', 'DWORD', 'QWORD', 'BYTE'}
 
 class TokenType(Enum):
