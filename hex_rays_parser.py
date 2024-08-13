@@ -457,7 +457,7 @@ class ForStatement(Statement):
         return children
 
 class ReturnStatement(Statement):
-    def __init__(self, expression, begin_pos: int, end_pos: int):
+    def __init__(self, expression: Optional[Operand], begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
         self.expression: Optional[Operand] = expression
     
