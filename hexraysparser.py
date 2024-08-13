@@ -95,6 +95,15 @@ class Lexer:
         
         if value in C_KEYWORDS:
             return Token(TokenType.KEYWORD, value, self.line, self.column - (self.position - start), self.position)
+        peek = self.peek_next_token()
+        while peek.type == TokenType.OPERATOR and peek.value == '::':
+            self.operator()
+            peek = self.peek_next_token()
+            if peek.type != TokenType.IDENTIFIER:
+                break
+            identifier = self.identifier()
+            value = f"{value}::{identifier.value}"
+            peek = self.peek_next_token()
         return Token(TokenType.IDENTIFIER, value, self.line, self.column - (self.position - start), self.position)
 
     def number(self) -> Token:
@@ -604,24 +613,20 @@ class Parser:
         return VariableDeclaration(var_type, var_name.value, initializer, start_pos, self.current_token.position)
 
 
-    def parse_function_name(self) -> Tuple[Token, Optional[str]]:
+    def parse_function_signature(self) -> Tuple[Type, Token, Optional[str]]:
+        _type = self.parse_type()
         _name = self.expect(TokenType.IDENTIFIER)
         calling_convention = None
         if _name.value in MSVC_CALLING_CONVENTIONS:
             calling_convention = _name.value
             _name = self.expect(TokenType.IDENTIFIER)
-        if self.current_token.type == TokenType.OPERATOR and self.current_token.value == '::':
-            _name.value += '::'
-            self.advance()
-            _name.value += self.expect(TokenType.IDENTIFIER).value
-        return _name, calling_convention
+        return _type, _name, calling_convention
 
     def is_function_declaration(self) -> bool:
         position = self.position
         current_token = self.current_token
         try:
-            _type = self.parse_type()
-            _name, calling_convention = self.parse_function_name()
+            _type, _name, calling_convention = self.parse_function_signature()
             self.expect(TokenType.OPERATOR, '(')
             return True
         except ParserException:
@@ -632,8 +637,7 @@ class Parser:
 
     def parse_function_declaration(self) -> FunctionDeclaration:
         start_pos = self.current_token.position
-        _type = self.parse_type()
-        _name, calling_convention = self.parse_function_name()
+        _type, _name, calling_convention = self.parse_function_signature()
         self.expect(TokenType.OPERATOR, '(')
         parameters = self.parse_parameters()
         self.expect(TokenType.OPERATOR, ')')
@@ -682,7 +686,17 @@ class Parser:
         return ExpressionStatement(expression, start_pos, self.current_token.position)
 
     def parse_expression(self) -> Operand:
-        return self.parse_logical_or()
+        return self.parse_assignment()
+    
+    def parse_assignment(self) -> Operand:
+        start_pos = self.current_token.position
+        left = self.parse_logical_or()
+        if self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>=']:
+            op = self.current_token
+            self.advance()
+            right = self.parse_assignment()
+            return BinaryOperation(left, op, right, start_pos, self.current_token.position)
+        return left
 
     def parse_logical_or(self) -> Operand:
         start_pos = self.current_token.position
@@ -698,6 +712,36 @@ class Parser:
         start_pos = self.current_token.position
         expr = self.parse_equality()
         while self.current_token.type == TokenType.OPERATOR and self.current_token.value == '&&':
+            op = self.current_token
+            self.advance()
+            right = self.parse_bitwise_or()
+            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
+        return expr
+    
+    def parse_bitwise_or(self) -> Operand:
+        start_pos = self.current_token.position
+        expr = self.parse_bitwise_xor()
+        while self.current_token.type == TokenType.OPERATOR and self.current_token.value == '|':
+            op = self.current_token
+            self.advance()
+            right = self.parse_bitwise_xor()
+            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
+        return expr
+
+    def parse_bitwise_xor(self) -> Operand:
+        start_pos = self.current_token.position
+        expr = self.parse_bitwise_and()
+        while self.current_token.type == TokenType.OPERATOR and self.current_token.value == '^':
+            op = self.current_token
+            self.advance()
+            right = self.parse_bitwise_and()
+            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
+        return expr
+
+    def parse_bitwise_and(self) -> Operand:
+        start_pos = self.current_token.position
+        expr = self.parse_equality()
+        while self.current_token.type == TokenType.OPERATOR and self.current_token.value == '&':
             op = self.current_token
             self.advance()
             right = self.parse_equality()
@@ -799,6 +843,7 @@ class Parser:
 
     def advance(self):
         self.current_token = self.lexer.next_token()
+        peek = self.lexer.peek_next_token()
         while self.current_token.type in (TokenType.LINE_COMMENT, TokenType.BLOCK_COMMENT):
             self.comments.append(self.current_token)
             self.current_token = self.lexer.next_token()
@@ -819,10 +864,8 @@ class Parser:
         return ParserException(f"Parser error: {message}")
 
 lexer = Lexer("""
-unsigned int BSAnimGroupSequence::GetAnimGroup(int index) {
-    unsigned int a = 5 + 5;
-    int b = 10;
-    return 0;
+BSAnimGroupSequence::AnimType GetAnimType(int index) {
+    return BSAnimGroupSequence::AnimType::Get(index);
 }
 """)
 parser = Parser(lexer)
