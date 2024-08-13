@@ -121,22 +121,26 @@ class Lexer:
         current_op: str = self.code[self.position]
         self.advance()
 
-        # Check for multi-character operators
-        if self.position < len(self.code):
-            next_char: str = self.code[self.position]
-            potential_op: str = current_op + next_char
-            
-            if potential_op in C_OPERATORS:
-                self.advance()
-                current_op = potential_op
+        if self.position >= len(self.code):
+            return Token(TokenType.OPERATOR, current_op, self.line, self.column - len(current_op), self.position)
 
-                # Check for three-character operators
-                if self.position < len(self.code):
-                    next_char = self.code[self.position]
-                    potential_op = current_op + next_char
-                    if potential_op in C_OPERATORS:
-                        self.advance()
-                        current_op = potential_op
+        next_char: str = self.code[self.position]
+        potential_op: str = current_op + next_char
+        
+        if potential_op not in C_OPERATORS:
+            return Token(TokenType.OPERATOR, current_op, self.line, self.column - len(current_op), self.position)
+
+        self.advance()
+        current_op = potential_op
+
+        if self.position >= len(self.code):
+            return Token(TokenType.OPERATOR, current_op, self.line, self.column - len(current_op), self.position)
+
+        next_char = self.code[self.position]
+        potential_op = current_op + next_char
+        if potential_op in C_OPERATORS:
+            self.advance()
+            current_op = potential_op
 
         return Token(TokenType.OPERATOR, current_op, self.line, self.column - len(current_op), self.position)
 
@@ -376,15 +380,17 @@ class BinaryOperation(Operand):
         left_str = str(self.left)
         right_str = str(self.right)
         
-        if isinstance(self.left, BinaryOperation) and self.__needs_parentheses(self.left):
+        if isinstance(self.left, BinaryOperation) and self._needs_parentheses(self.left):
             left_str = f"({left_str})"
         
-        if isinstance(self.right, BinaryOperation) and self.__needs_parentheses(self.right):
+        if isinstance(self.right, BinaryOperation) and self._needs_parentheses(self.right):
             right_str = f"({right_str})"
         
+        if self.operator.value == ',':
+            return f"{left_str}, {right_str}"
         return f"{left_str} {self.operator} {right_str}"
 
-    def __needs_parentheses(self, child_op: Self):
+    def _needs_parentheses(self, child_op: Self):
         precedence = {
             '*': 3, '/': 3, '%': 3,
             '+': 2, '-': 2,
@@ -458,6 +464,9 @@ class Literal(Operand):
     
     def __str__(self):
         return self.value
+    
+class StringLiteral(Literal):
+    pass # value should already have quotes
 
 class Identifier(Operand):
     def __init__(self, name: str, begin_pos: int, end_pos: int):
@@ -584,9 +593,7 @@ class Parser:
             self.position = position
             self.current_token = current_token
 
-    def parse_statement(self) -> Statement:
-        start_pos = self.current_token.position
-        
+    def parse_statement(self) -> Statement:        
         if self.current_token.value == 'if':
             return self.parse_if_statement()
         elif self.current_token.value == 'while':
@@ -653,7 +660,7 @@ class Parser:
         start_pos = self.current_token.position
         self.expect(TokenType.KEYWORD, 'if')
         self.expect(TokenType.OPERATOR, '(')
-        condition = self.parse_expression()
+        condition = self.parse_comma_expression()
         self.expect(TokenType.OPERATOR, ')')
         then_branch = self.parse_statement()
         else_branch = None
@@ -687,8 +694,18 @@ class Parser:
         return ExpressionStatement(expression, start_pos, self.current_token.position)
 
     def parse_expression(self) -> Operand:
-        return self.parse_assignment()
-    
+        return self.parse_comma_expression()
+
+    def parse_comma_expression(self) -> Operand:
+        start_pos = self.current_token.position
+        expr = self.parse_assignment()
+        while self.current_token.type == TokenType.OPERATOR and self.current_token.value == ',':
+            op = self.current_token
+            self.advance()
+            right = self.parse_assignment()
+            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
+        return expr
+
     def parse_assignment(self) -> Operand:
         start_pos = self.current_token.position
         left = self.parse_logical_or()
@@ -814,6 +831,10 @@ class Parser:
             self.advance()
             expr = self.parse_expression()
             self.expect(TokenType.OPERATOR, ')')
+        elif self.current_token.type == TokenType.STRING:
+            value = self.current_token.value
+            self.advance()
+            expr = StringLiteral(value, start_pos, self.current_token.position)
         else:
             raise self.error(f"Unexpected token: {self.current_token}")
 
@@ -851,13 +872,11 @@ class Parser:
 
     def advance(self):
         self.current_token = self.lexer.next_token()
-        peek = self.lexer.peek_next_token()
         while self.current_token.type in (TokenType.LINE_COMMENT, TokenType.BLOCK_COMMENT):
             self.comments.append(self.current_token)
             self.current_token = self.lexer.next_token()
         self.position = self.current_token.position
         self._rest = self.lexer.code[self.position:]
-
 
     def expect(self, token_type: TokenType, value: Optional[str] = None) -> Token:
         if self.current_token.type != token_type:
@@ -872,26 +891,7 @@ class Parser:
         return ParserException(f"Parser error: {message}")
 
 lexer = Lexer("""
-BSAnimGroupSequence *__thiscall AnimData::MorphToSequenceIDOrGroup(
-        AnimData *this,
-        unsigned __int16 a2,
-        eAnimSequence a3)
-{
-  int v5; // [esp+Ch] [ebp-Ch]
-  AnimSequenceBase *v6; // [esp+10h] [ebp-8h] BYREF
-  NiAVObject *v7; // [esp+14h] [ebp-4h]
-
-  if ( a2 == 255 || !NiTPointerMap::Lookup(this->pMapAnimSequenceBase, a2, &v6) )
-    return 0;
-  v5 = a3;
-  if ( a3 == -1 )
-    v5 = g_animSequenceTypes[9 * AnimGroupID::GetGroupID(a2)];
-  if ( v5 < 5 || v5 > 6 || (*(v6->__vftable + 3))(v6) )
-    v7 = (*(v6->__vftable + 4))(v6, -1);
-  else
-    v7 = AnimSequenceSingle::48F500(v6, this->animSequence[4], v5);
-  return AnimData::MorphOrBlendToSequence(this, v7, a2, a3);
-}
+LOBYTE(v6) = 1
 """.strip())
 parser = Parser(lexer)
 program = parser.parse()
