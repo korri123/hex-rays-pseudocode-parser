@@ -414,6 +414,36 @@ class WhileStatement(Statement):
     def children(self) -> List[ASTNode]:
         return [self.condition, self.body]
 
+class ForStatement(Statement):
+    def __init__(self, initializer: Optional[Statement], condition: Optional[Operand], increment: Optional[Operand], body: Statement, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
+        self.initializer: Optional[Statement] = initializer
+        self.condition: Optional[Operand] = condition
+        self.increment: Optional[Operand] = increment
+        self.body: Statement = body
+    
+    def __str__(self):
+        init_str = str(self.initializer) if self.initializer else ''
+        cond_str = str(self.condition) if self.condition else ''
+        incr_str = str(self.increment) if self.increment else ''
+        return f"for ({init_str} {cond_str}; {incr_str})\n{self._indent(self.body)}"
+    
+    def _indent(self, operand: Statement):
+        if isinstance(operand, CompoundStatement):
+            return str(operand)
+        return '\n'.join('    ' + line for line in str(operand).split('\n'))
+
+    def children(self) -> List[ASTNode]:
+        children = []
+        if self.initializer:
+            children.append(self.initializer)
+        if self.condition:
+            children.append(self.condition)
+        if self.increment:
+            children.append(self.increment)
+        children.append(self.body)
+        return children
+
 class ReturnStatement(Statement):
     def __init__(self, expression, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
@@ -734,6 +764,8 @@ class Parser:
             return self.parse_if_statement()
         elif self.current_token.value == 'while':
             return self.parse_while_statement()
+        elif self.current_token.value == 'for':
+            return self.parse_for_statement()
         elif self.current_token.value == 'return':
             return self.parse_return_statement()
         elif self.current_token.type == TokenType.OPERATOR and self.current_token.value == '{':
@@ -836,6 +868,38 @@ class Parser:
         self.expect(TokenType.OPERATOR, ')')
         body = self.parse_statement()
         return WhileStatement(condition, body, start_pos, self.current_token.position)
+
+    def parse_for_statement(self) -> ForStatement:
+        start_pos = self.current_token.position
+        self.expect(TokenType.KEYWORD, 'for')
+        self.expect(TokenType.OPERATOR, '(')
+        
+        # Parse initializer
+        initializer = None
+        if self.current_token.type != TokenType.OPERATOR or self.current_token.value != ';':
+            if self.is_variable_declaration():
+                initializer = self.parse_variable_declaration()
+            else:
+                initializer = self.parse_expression_statement()
+        else:
+            self.advance()  # Skip the semicolon
+
+        # Parse condition
+        condition = None
+        if self.current_token.type != TokenType.OPERATOR or self.current_token.value != ';':
+            condition = self.parse_expression()
+        self.expect(TokenType.OPERATOR, ';')
+
+        # Parse increment
+        increment = None
+        if self.current_token.type != TokenType.OPERATOR or self.current_token.value != ')':
+            increment = self.parse_expression()
+        self.expect(TokenType.OPERATOR, ')')
+
+        # Parse body
+        body = self.parse_statement()
+
+        return ForStatement(initializer, condition, increment, body, start_pos, self.current_token.position)
 
     def parse_return_statement(self) -> ReturnStatement:
         start_pos = self.current_token.position
