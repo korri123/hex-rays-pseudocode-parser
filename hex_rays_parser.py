@@ -115,12 +115,24 @@ class Lexer:
 
     def number(self) -> Token:
         start: int = self.position
-        while self.position < len(self.code) and self.code[self.position].isdigit():
-            self.advance()
-        if self.position < len(self.code) and self.code[self.position] == '.':
-            self.advance()
+        if self.code[self.position:self.position+2].lower() == '0x':
+            # Hexadecimal number
+            self.advance(2)
+            while self.position < len(self.code) and (self.code[self.position].isdigit() or self.code[self.position].lower() in 'abcdef'):
+                self.advance()
+        elif self.code[self.position:self.position+2].lower() == '0b':
+            # Binary number
+            self.advance(2)
+            while self.position < len(self.code) and self.code[self.position] in '01':
+                self.advance()
+        else:
+            # Decimal number
             while self.position < len(self.code) and self.code[self.position].isdigit():
                 self.advance()
+            if self.position < len(self.code) and self.code[self.position] == '.':
+                self.advance()
+                while self.position < len(self.code) and self.code[self.position].isdigit():
+                    self.advance()
         value: str = self.code[start:self.position]
         return Token(TokenType.NUMBER, value, self.line, self.column - (self.position - start), self.position)
 
