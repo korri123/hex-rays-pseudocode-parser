@@ -501,12 +501,15 @@ class BinaryOperation(Operand):
         return [self.left, self.right]
 
 class UnaryOperation(Operand):
-    def __init__(self, operator: Token, operand: Operand, begin_pos: int, end_pos: int):
+    def __init__(self, operator: Token, operand: Operand, is_postfix: bool, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
         self.operator: Token = operator
         self.operand: Operand = operand
+        self.is_postfix: bool = is_postfix
     
     def __str__(self):
+        if self.is_postfix:
+            return f"{self.operand}{self.operator}"
         if isinstance(self.operand, BinaryOperation):
             return f"{self.operator}({self.operand})"
         return f"{self.operator}{self.operand}"
@@ -1031,12 +1034,41 @@ class Parser:
 
     def parse_unary(self) -> Operand:
         start_pos = self.current_token.position
-        if self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['-', '!', '*', '&', '~']:
+        if self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['-', '!', '*', '&', '~', '++', '--']:
             op = self.current_token
             self.advance()
             expr = self.parse_unary()
-            return UnaryOperation(op, expr, start_pos, self.current_token.position)
-        return self.parse_primary()
+            return UnaryOperation(op, expr, False, start_pos, self.current_token.position)
+        return self.parse_postfix()
+
+    def parse_postfix(self) -> Operand:
+        expr = self.parse_primary()
+        start_pos = expr.begin_pos
+
+        while self.current_token.type == TokenType.OPERATOR:
+            if self.current_token.value in ['++', '--']:
+                op = self.current_token
+                self.advance()
+                expr = UnaryOperation(op, expr, True, start_pos, self.current_token.position)
+            elif self.current_token.value == '(':
+                expr = self.parse_function_call(expr, start_pos)
+            elif self.current_token.value == '[':
+                self.advance()
+                index = self.parse_expression()
+                self.expect(TokenType.OPERATOR, ']')
+                expr = ArrayAccess(expr, index, start_pos, self.current_token.position)
+            elif self.current_token.value == '.':
+                self.advance()
+                member = self.parse_primary()
+                expr = MemberAccess(expr, member, start_pos, self.current_token.position)
+            elif self.current_token.value == '->':
+                self.advance()
+                member = self.parse_primary()
+                expr = PointerAccess(expr, member, start_pos, self.current_token.position)
+            else:
+                break
+
+        return expr
 
     def parse_primary(self) -> Operand:
         start_pos = self.current_token.position
@@ -1068,25 +1100,6 @@ class Parser:
             expr = StringLiteral(value, start_pos, self.current_token.position)
         else:
             raise self.error(f"Unexpected token: {self.current_token}")
-
-        while self.current_token.type == TokenType.OPERATOR:
-            if self.current_token.value == '(':
-                expr = self.parse_function_call(expr, start_pos)
-            elif self.current_token.value == '[':
-                self.advance()
-                index = self.parse_expression()
-                self.expect(TokenType.OPERATOR, ']')
-                expr = ArrayAccess(expr, index, start_pos, self.current_token.position)
-            elif self.current_token.value == '.':
-                self.advance()
-                member = self.parse_primary()
-                expr = MemberAccess(expr, member, start_pos, self.current_token.position)
-            elif self.current_token.value == '->':
-                self.advance()
-                member = self.parse_primary()
-                expr = PointerAccess(expr, member, start_pos, self.current_token.position)
-            else:
-                break
 
         return expr
 
