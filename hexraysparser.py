@@ -1,5 +1,4 @@
 
-import re
 from typing import Optional, List, Self, Tuple
 from enum import Enum, auto
 
@@ -289,8 +288,15 @@ class CompoundStatement(Statement):
         self.statements: List[Statement] = statements
     
     def __str__(self):
-        stmt_strs = '\n'.join('    ' + str(stmt).replace('\n', '\n    ') for stmt in self.statements)
-        return f"{{\n{stmt_strs}\n}}"
+        stmt_strs = []
+        for stmt in self.statements:
+            if isinstance(stmt, LabelStatement):
+                # Do not indent label statements
+                stmt_strs.append(str(stmt))
+            else:
+                stmt_strs.append('    ' + str(stmt).replace('\n', '\n    '))
+        NEW_LINE = '\n'
+        return f"{{\n{NEW_LINE.join(stmt_strs)}\n}}"
 
 class Parameter(ASTNode):
     def __init__(self, type: Type, name: str, begin_pos: int, end_pos: int):
@@ -503,6 +509,22 @@ class VariableDeclaration(Statement):
             return f"{self.type} {self.name} = {self.initializer};"
         return f"{self.type} {self.name};"
 
+class GotoStatement(Statement):
+    def __init__(self, label: str, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
+        self.label: str = label
+    
+    def __str__(self):
+        return f"goto {self.label};"
+
+class LabelStatement(Statement):
+    def __init__(self, label: str, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
+        self.label: str = label
+    
+    def __str__(self):
+        return f"{self.label}:"
+
 class IDAOperator(Operand):
     def __init__(self, operator: str, operand: Operand, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
@@ -616,8 +638,31 @@ class Parser:
             return self.parse_variable_declaration()
         elif self.is_function_declaration():
             return self.parse_function_declaration()
+        elif self.current_token.value == 'goto':
+            return self.parse_goto_statement()
+        elif self.is_label():
+            return self.parse_label_statement()
         else:
             return self.parse_expression_statement()
+
+    def parse_goto_statement(self) -> GotoStatement:
+        start_pos = self.current_token.position
+        self.expect(TokenType.KEYWORD, 'goto')
+        label = self.expect(TokenType.IDENTIFIER)
+        self.expect(TokenType.OPERATOR, ';')
+        return GotoStatement(label.value, start_pos, self.current_token.position)
+
+    def is_label(self) -> bool:
+        if self.current_token.type != TokenType.IDENTIFIER:
+            return False
+        next_token = self.lexer.peek_next_token()
+        return next_token.type == TokenType.OPERATOR and next_token.value == ':'
+
+    def parse_label_statement(self) -> LabelStatement:
+        start_pos = self.current_token.position
+        label = self.expect(TokenType.IDENTIFIER)
+        self.expect(TokenType.OPERATOR, ':')
+        return LabelStatement(label.value, start_pos, self.current_token.position)
 
     def parse_variable_declaration(self) -> VariableDeclaration:
         start_pos = self.current_token.position
@@ -829,7 +874,8 @@ class Parser:
         start_pos = self.current_token.position
         expr = None
 
-        if self.current_token.type == TokenType.IDENTIFIER and self.current_token.value in IDA_PSEUDOCODE_OPERATORS:
+        if (self.current_token.type == TokenType.IDENTIFIER and 
+            self.current_token.value in IDA_PSEUDOCODE_OPERATORS):
             operator = self.current_token.value
             self.advance()
             self.expect(TokenType.OPERATOR, '(')
@@ -908,7 +954,12 @@ class Parser:
         return ParserException(f"Parser error: {message}")
 
 lexer = Lexer("""
-LOBYTE(v6) = 1;
+void main() {
+    if (true)
+        goto label;
+label:
+    printf("Hello, world!");
+}
 """.strip())
 parser = Parser(lexer)
 program = parser.parse()
