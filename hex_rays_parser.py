@@ -480,10 +480,12 @@ class BinaryOperation(Operand):
         left_str = str(self.left)
         right_str = str(self.right)
         
-        if isinstance(self.left, BinaryOperation) and self._needs_parentheses(self.left):
+        if ((isinstance(self.left, BinaryOperation) and self._needs_parentheses(self.left))
+            or isinstance(self.left, CommaExpression)):
             left_str = f"({left_str})"
         
-        if isinstance(self.right, BinaryOperation) and self._needs_parentheses(self.right):
+        if ((isinstance(self.right, BinaryOperation) and self._needs_parentheses(self.right))
+            or isinstance(self.right, CommaExpression)):
             right_str = f"({right_str})"
         
         if self.operator.value == ',':
@@ -675,6 +677,18 @@ class IDAOperator(Operand):
     
     def children(self) -> List[ASTNode]:
         return [self.operand]
+
+class CommaExpression(Operand):
+    def __init__(self, expressions: List[Operand], begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
+        self.expressions: List[Operand] = expressions
+    
+    def __str__(self):
+        return ', '.join(str(expr) for expr in self.expressions)
+    
+    def children(self) -> List[ASTNode]:
+        return cast(List[ASTNode], self.expressions)
+
 
 class ParserException(Exception):
     pass
@@ -937,11 +951,12 @@ class Parser:
     def parse_comma_expression(self) -> Operand:
         start_pos = self.current_token.position
         expr = self.parse_assignment()
-        while self.current_token.type == TokenType.OPERATOR and self.current_token.value == ',':
-            op = self.current_token
-            self.advance()
-            right = self.parse_assignment()
-            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
+        if self.current_token.type == TokenType.OPERATOR and self.current_token.value == ',':
+            expressions = [expr]
+            while self.current_token.type == TokenType.OPERATOR and self.current_token.value == ',':
+                self.advance()
+                expressions.append(self.parse_assignment())
+            return CommaExpression(expressions, start_pos, self.current_token.position)
         return expr
 
     def parse_assignment(self) -> Operand:
