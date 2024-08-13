@@ -1,6 +1,7 @@
 
-from typing import Optional, List, Self, Tuple
+from typing import Optional, List, Self, Tuple, cast
 from enum import Enum, auto
+from abc import ABC, abstractmethod
 
 C_VOID_TYPE = {'void'}
 C_INT_TYPES = {'int', 'char', 'short', 'long', 'long long'}
@@ -204,10 +205,14 @@ class Lexer:
     def error(self, message: str) -> Exception:
         return Exception(f"Lexer error at line {self.line}, column {self.column}: {message}")
 
-class ASTNode:
+class ASTNode(ABC):
     def __init__(self, begin_pos: int, end_pos: int):
         self.begin_pos: int = begin_pos
         self.end_pos: int = end_pos
+
+    @abstractmethod
+    def children(self) -> List['ASTNode']:
+        pass
 
 class Program(ASTNode):
     def __init__(self, statements, comments, begin_pos: int, end_pos: int):
@@ -262,9 +267,15 @@ class Program(ASTNode):
             comment_index += 1
         return result
 
+    def children(self) -> List[ASTNode]:
+        return cast(List[ASTNode], self.statements)
+
 class Statement(ASTNode):
     def __init__(self, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
+
+    def children(self) -> List[ASTNode]:
+        return []
 
 class Type(ASTNode):
     def __init__(self, name: str, specifiers: List[str], pointer_count: Optional[int], begin_pos: int, end_pos: int):
@@ -282,8 +293,11 @@ class Type(ASTNode):
             result += '*' * self.pointer_count
         return result
 
+    def children(self) -> List[ASTNode]:
+        return []
+
 class CompoundStatement(Statement):
-    def __init__(self, statements, begin_pos: int, end_pos: int):
+    def __init__(self, statements: List[Statement], begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
         self.statements: List[Statement] = statements
     
@@ -298,6 +312,9 @@ class CompoundStatement(Statement):
         NEW_LINE = '\n'
         return f"{{\n{NEW_LINE.join(stmt_strs)}\n}}"
 
+    def children(self) -> List[ASTNode]:
+        return cast(List[ASTNode], self.statements)
+
 class Parameter(ASTNode):
     def __init__(self, type: Type, name: str, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
@@ -306,6 +323,9 @@ class Parameter(ASTNode):
     
     def __str__(self):
         return f"{self.type} {self.name}"
+
+    def children(self) -> List[ASTNode]:
+        return [self.type]
 
 class FunctionDeclaration(Statement):
     def __init__(self, return_type: Type, name: str, parameters: List[Parameter], body: Optional[CompoundStatement], calling_convention: Optional[str], begin_pos: int, end_pos: int):
@@ -328,9 +348,19 @@ class FunctionDeclaration(Statement):
             result += ";"
         return result
 
+    def children(self) -> List[ASTNode]:
+        children: List[ASTNode] = [self.return_type]
+        children += self.parameters
+        if self.body:
+            children.append(self.body)
+        return children
+
 class Operand(ASTNode):
     def __init__(self, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
+
+    def children(self) -> List[ASTNode]:
+        return []
 
 class ExpressionStatement(Statement):
     def __init__(self, expression: Operand, begin_pos: int, end_pos: int):
@@ -339,6 +369,9 @@ class ExpressionStatement(Statement):
     
     def __str__(self):
         return f"{self.expression};"
+
+    def children(self) -> List[ASTNode]:
+        return [self.expression]
 
 class IfStatement(Statement):
     def __init__(self, condition: Operand, then_branch: Statement, else_branch: Optional[Statement], begin_pos: int, end_pos: int):
@@ -357,6 +390,12 @@ class IfStatement(Statement):
             return str(operand)
         return '\n'.join('    ' + line for line in str(operand).split('\n'))
 
+    def children(self) -> List[ASTNode]:
+        children = [self.condition, self.then_branch]
+        if self.else_branch:
+            children.append(self.else_branch)
+        return children
+
 class WhileStatement(Statement):
     def __init__(self, condition, body, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
@@ -365,6 +404,9 @@ class WhileStatement(Statement):
     
     def __str__(self):
         return f"while ({self.condition})\n{self.body}"
+
+    def children(self) -> List[ASTNode]:
+        return [self.condition, self.body]
 
 class ReturnStatement(Statement):
     def __init__(self, expression, begin_pos: int, end_pos: int):
@@ -375,6 +417,9 @@ class ReturnStatement(Statement):
         if self.expression:
             return f"return {self.expression};"
         return "return;"
+
+    def children(self) -> List[ASTNode]:
+        return [self.expression] if self.expression else []
 
 class BinaryOperation(Operand):
     def __init__(self, left: Operand, operator: Token, right: Operand, begin_pos: int, end_pos: int):
@@ -416,6 +461,9 @@ class BinaryOperation(Operand):
             return True
         return False
 
+    def children(self) -> List[ASTNode]:
+        return [self.left, self.right]
+
 class UnaryOperation(Operand):
     def __init__(self, operator: Token, operand: Operand, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
@@ -427,6 +475,9 @@ class UnaryOperation(Operand):
             return f"{self.operator}({self.operand})"
         return f"{self.operator}{self.operand}"
 
+    def children(self) -> List[ASTNode]:
+        return [self.operand]
+
 class ArrayAccess(Operand):
     def __init__(self, array: Operand, index: Operand, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
@@ -436,6 +487,9 @@ class ArrayAccess(Operand):
     def __str__(self):
         return f"{self.array}[{self.index}]"
     
+    def children(self) -> List[ASTNode]:
+        return [self.array, self.index]
+
 class MemberAccess(Operand):
     def __init__(self, object: Operand, member: Operand, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
@@ -445,6 +499,9 @@ class MemberAccess(Operand):
     def __str__(self):
         return f"{self.object}.{self.member}"
     
+    def children(self) -> List[ASTNode]:
+        return [self.object, self.member]
+
 class PointerAccess(Operand):
     def __init__(self, pointer: Operand, member: Operand, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
@@ -453,6 +510,9 @@ class PointerAccess(Operand):
     
     def __str__(self):
         return f"{self.pointer}->{self.member}"
+    
+    def children(self) -> List[ASTNode]:
+        return [self.pointer, self.member]
 
 class TernaryOperation(Operand):
     def __init__(self, condition: Operand, true_branch: Operand, false_branch: Operand, begin_pos: int, end_pos: int):
@@ -463,6 +523,9 @@ class TernaryOperation(Operand):
     
     def __str__(self):
         return f"({self.condition} ? {self.true_branch} : {self.false_branch})"
+    
+    def children(self) -> List[ASTNode]:
+        return [self.condition, self.true_branch, self.false_branch]
 
 class Literal(Operand):
     def __init__(self, value: str, begin_pos: int, end_pos: int):
@@ -472,8 +535,14 @@ class Literal(Operand):
     def __str__(self):
         return self.value
     
+    def children(self) -> List[ASTNode]:
+        return []
+
 class StringLiteral(Literal):
     pass # value should already have quotes
+    
+    def children(self) -> List[ASTNode]:
+        return []
 
 class Identifier(Operand):
     def __init__(self, name: str, begin_pos: int, end_pos: int):
@@ -482,6 +551,9 @@ class Identifier(Operand):
     
     def __str__(self):
         return self.name
+    
+    def children(self) -> List[ASTNode]:
+        return []
 
 class FunctionCall(Operand):
     def __init__(self, function: Operand, arguments: List[Operand], begin_pos: int, end_pos: int):
@@ -496,6 +568,10 @@ class FunctionCall(Operand):
         if isinstance(self.function, UnaryOperation):
             return f"({self.function})({args})"
         return f"{self.function}({args})"
+    
+    def children(self) -> List[ASTNode]:
+        children: List[ASTNode] = [self.function]
+        return children + self.arguments
 
 class VariableDeclaration(Statement):
     def __init__(self, type: Type, name: str, initializer: Optional[Operand], begin_pos: int, end_pos: int):
@@ -508,6 +584,12 @@ class VariableDeclaration(Statement):
         if self.initializer:
             return f"{self.type} {self.name} = {self.initializer};"
         return f"{self.type} {self.name};"
+    
+    def children(self) -> List[ASTNode]:
+        children: List[ASTNode] = [self.type]
+        if self.initializer:
+            children.append(self.initializer)
+        return children
 
 class GotoStatement(Statement):
     def __init__(self, label: str, begin_pos: int, end_pos: int):
@@ -516,6 +598,9 @@ class GotoStatement(Statement):
     
     def __str__(self):
         return f"goto {self.label};"
+    
+    def children(self) -> List[ASTNode]:
+        return []
 
 class LabelStatement(Statement):
     def __init__(self, label: str, begin_pos: int, end_pos: int):
@@ -524,6 +609,9 @@ class LabelStatement(Statement):
     
     def __str__(self):
         return f"{self.label}:"
+    
+    def children(self) -> List[ASTNode]:
+        return []
 
 class IDAOperator(Operand):
     def __init__(self, operator: str, operand: Operand, begin_pos: int, end_pos: int):
@@ -533,12 +621,15 @@ class IDAOperator(Operand):
     
     def __str__(self):
         return f"{self.operator}({self.operand})"
+    
+    def children(self) -> List[ASTNode]:
+        return [self.operand]
 
 class ParserException(Exception):
     pass
 
 class Parser:
-    def __init__(self, lexer: Lexer):
+    def __init__(self, lexer: Lexer = Lexer()):
         self.lexer: Lexer = lexer
         self.current_token: Token = self.lexer.next_token()
         self._rest: str = self.lexer.code[self.lexer.position:]
