@@ -305,7 +305,7 @@ class Type(ASTNode):
 
     def __str__(self):
         result = ""
-        if len(self.specifiers):
+        if self.specifiers:
             result += ' '.join(self.specifiers) + ' '
         result += self.name
         if self.pointer_count:
@@ -616,7 +616,7 @@ class FunctionCall(Operand):
         self.arguments = arguments
     
     def __str__(self):
-        if not len(self.arguments):
+        if not self.arguments:
             return f"{self.function}()"
         args = ', '.join(str(arg) for arg in self.arguments)
         if isinstance(self.function, UnaryOperation):
@@ -705,8 +705,9 @@ class Parser:
             self.lexer.set_code(code)
         
         self.current_token: Token = self.lexer.next_token()
+        self._comments: List[Token] = []
         self._rest: str = self.lexer.code[self.lexer.position:]
-        self.comments: List[Token] = []
+        self._position_stack = []
 
     @property
     def position(self):
@@ -715,17 +716,6 @@ class Parser:
     @position.setter
     def position(self, value):
         self.lexer.position = value
-        self._rest = self.lexer.code[self.lexer.position:]
-
-        removed_comments = []
-        for comment in reversed(self.comments):
-            if value < comment.position:
-                removed_comments.append(comment)
-            else:
-                break
-        for comment in removed_comments:
-            self.comments.remove(comment)
-                
 
     @property
     def _dbg_token(self):
@@ -735,7 +725,7 @@ class Parser:
         declarations = []
         while self.current_token.type != TokenType.EOF:
             declarations.append(self.parse_statement())
-        program = Program(declarations, self.comments, 0, self.position)
+        program = Program(declarations, self._comments, 0, self.position)
         self.assign_parents(program)
         return program
 
@@ -782,19 +772,48 @@ class Parser:
         self.expect(TokenType.OPERATOR, '}')
         return CompoundStatement(statements, start_pos, self.current_token.position)
     
-    def is_variable_declaration(self) -> bool:
-        position = self.position
-        current_token = self.current_token
+    def push_position(self):
+        state = (self.lexer.position, self.current_token, self._comments.copy())
+        self._position_stack.append(state)
+
+    def pop_position(self):
+        if not self._position_stack:
+            raise ParserException("Attempted to pop from an empty position stack")
+        position, token, comments = self._position_stack.pop()
+        self.lexer.position = position
+        self.current_token = token
+        self._comments = comments
+        self._rest = self.lexer.code[self.lexer.position:]
+
+    def with_preserved_position(self, func):
+        self.push_position()
         try:
-            self.parse_type()
-            self.expect(TokenType.IDENTIFIER) # name
-            operator = self.expect(TokenType.OPERATOR)
-            return operator.value in ('=', ';')
-        except ParserException:
-            return False
+            return func()
         finally:
-            self.position = position
-            self.current_token = current_token
+            self.pop_position()
+
+    def is_variable_declaration(self) -> bool:
+        def check():
+            try:
+                self.parse_type()
+                self.expect(TokenType.IDENTIFIER)  # name
+                operator = self.expect(TokenType.OPERATOR)
+                return operator.value in ('=', ';')
+            except ParserException:
+                return False
+
+        return self.with_preserved_position(check)
+
+    def is_function_declaration(self) -> bool:
+        def check():
+            try:
+                self.parse_function_signature()
+                self.expect(TokenType.OPERATOR, '(')
+                return True
+            except ParserException:
+                return False
+
+        return self.with_preserved_position(check)
 
     def parse_statement(self) -> Statement:        
         if self.current_token.value == 'if':
@@ -848,7 +867,6 @@ class Parser:
         self.expect(TokenType.OPERATOR, ';')
         return VariableDeclaration(var_type, var_name.value, initializer, start_pos, self.current_token.position)
 
-
     def parse_function_signature(self) -> Tuple[Type, Token, Optional[str]]:
         _type = self.parse_type()
         _name = self.expect(TokenType.IDENTIFIER)
@@ -857,19 +875,6 @@ class Parser:
             calling_convention = _name.value
             _name = self.expect(TokenType.IDENTIFIER)
         return _type, _name, calling_convention
-
-    def is_function_declaration(self) -> bool:
-        position = self.position
-        current_token = self.current_token
-        try:
-            _type, _name, calling_convention = self.parse_function_signature()
-            self.expect(TokenType.OPERATOR, '(')
-            return True
-        except ParserException:
-            return False
-        finally:
-            self.position = position
-            self.current_token = current_token
 
     def parse_function_declaration(self) -> FunctionDeclaration:
         start_pos = self.current_token.position
@@ -1152,7 +1157,7 @@ class Parser:
     def advance(self):
         self.current_token = self.lexer.next_token()
         while self.current_token.type in (TokenType.LINE_COMMENT, TokenType.BLOCK_COMMENT):
-            self.comments.append(self.current_token)
+            self._comments.append(self.current_token)
             self.current_token = self.lexer.next_token()
         self.position = self.current_token.position
         self._rest = self.lexer.code[self.position:]
