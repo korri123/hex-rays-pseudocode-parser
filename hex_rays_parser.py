@@ -1,5 +1,5 @@
 
-from typing import Optional, List, Self, Tuple, cast
+from typing import Callable, Optional, List, Self, Tuple, cast
 from enum import Enum, auto
 from abc import ABC, abstractmethod
 
@@ -233,6 +233,44 @@ class ASTNode(ABC):
     def children(self) -> List['ASTNode']:
         pass
 
+    def replace_child(self, old_child: Self, new_child: Self):
+        index = self.children().index(old_child)
+        if index == -1:
+            raise ValueError(f"Child {old_child} not found")
+        self.children()[index] = new_child
+        new_child.parent = self
+
+    def replace_child_at_index(self, index: int, new_child: Self):
+        self.children()[index] = new_child
+        new_child.parent = self
+
+    def find_node(self, predicate: Callable[[Self], bool]) -> Optional[Self]:
+        def dfs(node: ASTNode) -> Optional[ASTNode]:
+            if predicate(node):
+                return node
+            for child in node.children():
+                result = dfs(child)
+                if result:
+                    return result
+            return None
+        
+        return dfs(self)
+    
+    def transform(self, transformation: Callable[[Self], Optional[Self]]) -> None:
+        def dfs(node: ASTNode) -> Optional[ASTNode]:
+            result = transformation(node)
+            if result is not None:
+                return result
+            
+            for i, child in enumerate(node.children()):
+                new_child = dfs(child)
+                if new_child is not None and new_child is not child:
+                    node.replace_child_at_index(i, new_child)
+            
+            return None
+        
+        dfs(self)
+
 class Program(ASTNode):
     def __init__(self, statements, comments, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
@@ -400,9 +438,14 @@ class IfStatement(Statement):
         self.else_branch: Optional[Statement] = else_branch
     
     def __str__(self):
-        if self.else_branch:
-            return f"if ({self.condition})\n{self._indent(self.then_branch)}\nelse\n{self._indent(self.else_branch)}"
-        return f"if ({self.condition})\n{self._indent(self.then_branch)}"
+        result = f"if ({self.condition})\n{self._indent(self.then_branch)}"
+        current_else = self.else_branch
+        while isinstance(current_else, IfStatement):
+            result += f"\nelse if ({current_else.condition})\n{self._indent(current_else.then_branch)}"
+            current_else = current_else.else_branch
+        if current_else:
+            result += f"\nelse\n{self._indent(current_else)}"
+        return result
     
     def _indent(self, operand: Statement):
         if isinstance(operand, CompoundStatement):
