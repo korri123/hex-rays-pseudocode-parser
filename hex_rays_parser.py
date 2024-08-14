@@ -520,10 +520,10 @@ class ReturnStatement(Statement):
         return [self.expression] if self.expression else []
 
 class BinaryOperation(Operand):
-    def __init__(self, left: Operand, operator: Token, right: Operand, begin_pos: int, end_pos: int):
+    def __init__(self, left: Operand, operator: str, right: Operand, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
         self.left: Operand = left
-        self.operator: Token = operator
+        self.operator: str = operator
         self.right: Operand = right
     
     def __str__(self):
@@ -531,11 +531,11 @@ class BinaryOperation(Operand):
         right_str = str(self.right)
         
         if ((isinstance(self.left, BinaryOperation) and self._needs_parentheses(self.left))
-            or isinstance(self.left, CommaExpression)):
+            or isinstance(self.left, CommaOperation)):
             left_str = f"({left_str})"
         
         if ((isinstance(self.right, BinaryOperation) and self._needs_parentheses(self.right))
-            or isinstance(self.right, CommaExpression)):
+            or isinstance(self.right, CommaOperation)):
             right_str = f"({right_str})"
         
         return f"{left_str} {self.operator} {right_str}"
@@ -550,8 +550,8 @@ class BinaryOperation(Operand):
             '||': -2
         }
         
-        parent_precedence = precedence.get(self.operator.value, 0)
-        child_precedence = precedence.get(child_op.operator.value, 0)
+        parent_precedence = precedence.get(self.operator, 0)
+        child_precedence = precedence.get(child_op.operator, 0)
         
         if parent_precedence > child_precedence:
             return True
@@ -563,9 +563,9 @@ class BinaryOperation(Operand):
         return [self.left, self.right]
 
 class UnaryOperation(Operand):
-    def __init__(self, operator: Token, operand: Operand, is_postfix: bool, begin_pos: int, end_pos: int):
+    def __init__(self, operator: str, operand: Operand, is_postfix: bool, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
-        self.operator: Token = operator
+        self.operator: str = operator
         self.operand: Operand = operand
         self.is_postfix: bool = is_postfix
     
@@ -726,16 +726,15 @@ class IDAOperator(Operand):
     def children(self) -> List[ASTNode]:
         return [self.operand]
 
-class CommaExpression(Operand):
-    def __init__(self, expressions: List[Operand], begin_pos: int, end_pos: int):
-        super().__init__(begin_pos, end_pos)
-        self.expressions: List[Operand] = expressions
+class CommaOperation(BinaryOperation):
+    def __init__(self, left: Operand, right: Operand, begin_pos: int, end_pos: int):
+        super().__init__(left, ',', right, begin_pos, end_pos)
     
     def __str__(self):
-        return ', '.join(str(expr) for expr in self.expressions)
+        return f"{self.left}, {self.right}"
     
     def children(self) -> List[ASTNode]:
-        return cast(List[ASTNode], self.expressions)
+        return cast(List[ASTNode], [self.left, self.right])
 
 class SwitchStatement(Statement):
     def __init__(self, expression: Operand, body: CompoundStatement, begin_pos: int, end_pos: int):
@@ -1040,18 +1039,20 @@ class Parser:
         return ExpressionStatement(expression, start_pos, self.current_token.position)
 
     def parse_expression(self) -> Operand:
-        return self.parse_assignment()
+        return self.parse_comma_expression()
 
     def parse_comma_expression(self) -> Operand:
         start_pos = self.current_token.position
         expr = self.parse_assignment()
         if self.current_token.type == TokenType.OPERATOR and self.current_token.value == ',':
-            expressions = [expr]
-            while self.current_token.type == TokenType.OPERATOR and self.current_token.value == ',':
-                self.advance()
-                expressions.append(self.parse_assignment())
-            return CommaExpression(expressions, start_pos, self.current_token.position)
+            self.advance()
+            right = self.parse_expression()
+            return CommaOperation(expr, right, start_pos, self.current_token.position)
         return expr
+    
+    def parse_argument(self) -> Operand:
+        # we skip parsing of comma expressions here
+        return self.parse_assignment()
 
     def parse_assignment(self) -> Operand:
         start_pos = self.current_token.position
@@ -1060,7 +1061,7 @@ class Parser:
             op = self.current_token
             self.advance()
             right = self.parse_assignment()
-            return BinaryOperation(left, op, right, start_pos, self.current_token.position)
+            return BinaryOperation(left, op.value, right, start_pos, self.current_token.position)
         return left
 
     def parse_logical_or(self) -> Operand:
@@ -1070,7 +1071,7 @@ class Parser:
             op = self.current_token
             self.advance()
             right = self.parse_logical_and()
-            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
+            expr = BinaryOperation(expr, op.value, right, start_pos, self.current_token.position)
         return expr
 
     def parse_logical_and(self) -> Operand:
@@ -1080,7 +1081,7 @@ class Parser:
             op = self.current_token
             self.advance()
             right = self.parse_bitwise_or()
-            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
+            expr = BinaryOperation(expr, op.value, right, start_pos, self.current_token.position)
         return expr
     
     def parse_bitwise_or(self) -> Operand:
@@ -1090,7 +1091,7 @@ class Parser:
             op = self.current_token
             self.advance()
             right = self.parse_bitwise_xor()
-            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
+            expr = BinaryOperation(expr, op.value, right, start_pos, self.current_token.position)
         return expr
 
     def parse_bitwise_xor(self) -> Operand:
@@ -1100,7 +1101,7 @@ class Parser:
             op = self.current_token
             self.advance()
             right = self.parse_bitwise_and()
-            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
+            expr = BinaryOperation(expr, op.value, right, start_pos, self.current_token.position)
         return expr
 
     def parse_bitwise_and(self) -> Operand:
@@ -1110,7 +1111,7 @@ class Parser:
             op = self.current_token
             self.advance()
             right = self.parse_equality()
-            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
+            expr = BinaryOperation(expr, op.value, right, start_pos, self.current_token.position)
         return expr
 
     def parse_equality(self) -> Operand:
@@ -1120,7 +1121,7 @@ class Parser:
             op = self.current_token
             self.advance()
             right = self.parse_relational()
-            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
+            expr = BinaryOperation(expr, op.value, right, start_pos, self.current_token.position)
         return expr
 
     def parse_relational(self) -> Operand:
@@ -1130,7 +1131,7 @@ class Parser:
             op = self.current_token
             self.advance()
             right = self.parse_additive()
-            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
+            expr = BinaryOperation(expr, op.value, right, start_pos, self.current_token.position)
         return expr
 
     def parse_additive(self) -> Operand:
@@ -1140,7 +1141,7 @@ class Parser:
             op = self.current_token
             self.advance()
             right = self.parse_multiplicative()
-            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
+            expr = BinaryOperation(expr, op.value, right, start_pos, self.current_token.position)
         return expr
 
     def parse_multiplicative(self) -> Operand:
@@ -1150,7 +1151,7 @@ class Parser:
             op = self.current_token
             self.advance()
             right = self.parse_unary()
-            expr = BinaryOperation(expr, op, right, start_pos, self.current_token.position)
+            expr = BinaryOperation(expr, op.value, right, start_pos, self.current_token.position)
         return expr
 
     def parse_unary(self) -> Operand:
@@ -1159,7 +1160,7 @@ class Parser:
             op = self.current_token
             self.advance()
             expr = self.parse_unary()
-            return UnaryOperation(op, expr, False, start_pos, self.current_token.position)
+            return UnaryOperation(op.value, expr, False, start_pos, self.current_token.position)
         return self.parse_postfix()
 
     def parse_postfix(self) -> Operand:
@@ -1170,7 +1171,7 @@ class Parser:
             if self.current_token.value in ['++', '--']:
                 op = self.current_token
                 self.advance()
-                expr = UnaryOperation(op, expr, True, start_pos, self.current_token.position)
+                expr = UnaryOperation(op.value, expr, True, start_pos, self.current_token.position)
             elif self.current_token.value == '(':
                 expr = self.parse_function_call(expr, start_pos)
             elif self.current_token.value == '[':
@@ -1231,7 +1232,7 @@ class Parser:
             arguments.append(self.parse_expression())
             while self.current_token.type == TokenType.OPERATOR and self.current_token.value == ',':
                 self.advance()
-                arguments.append(self.parse_expression())
+                arguments.append(self.parse_argument())
         self.expect(TokenType.OPERATOR, ')')
         return FunctionCall(function, arguments, start_pos, self.current_token.position)
 
