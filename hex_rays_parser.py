@@ -538,8 +538,6 @@ class BinaryOperation(Operand):
             or isinstance(self.right, CommaExpression)):
             right_str = f"({right_str})"
         
-        if self.operator.value == ',':
-            return f"{left_str}, {right_str}"
         return f"{left_str} {self.operator} {right_str}"
 
     def _needs_parentheses(self, child_op: Self):
@@ -739,6 +737,34 @@ class CommaExpression(Operand):
     def children(self) -> List[ASTNode]:
         return cast(List[ASTNode], self.expressions)
 
+class SwitchStatement(Statement):
+    def __init__(self, expression: Operand, body: CompoundStatement, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
+        self.expression: Operand = expression
+        self.body: CompoundStatement = body
+    
+    def __str__(self):
+        return f"switch ({self.expression})\n{self.body}"
+
+    def children(self) -> List[ASTNode]:
+        return [self.expression, self.body]
+
+class CaseStatement(Statement):
+    def __init__(self, value: Optional[Operand], statement: Statement, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
+        self.value: Optional[Operand] = value
+        self.statement: Statement = statement
+    
+    def __str__(self):
+        if self.value is None:
+            return f"default:\n    {self.statement}"
+        return f"case {self.value}:\n    {self.statement}"
+
+    def children(self) -> List[ASTNode]:
+        children = cast(List[ASTNode], [self.statement])
+        if self.value:
+            children.insert(0, self.value)
+        return children
 
 class ParserException(Exception):
     pass
@@ -873,6 +899,12 @@ class Parser:
             return self.parse_for_statement()
         elif self.current_token.value == 'return':
             return self.parse_return_statement()
+        elif self.current_token.value == 'switch':
+            return self.parse_switch_statement()
+        elif self.current_token.value == 'case':
+            return self.parse_case_statement()
+        elif self.current_token.value == 'default':
+            return self.parse_default_statement()
         elif self.current_token.type == TokenType.OPERATOR and self.current_token.value == '{':
             return self.parse_compound_statement()
         elif self.is_variable_declaration():
@@ -1008,7 +1040,7 @@ class Parser:
         return ExpressionStatement(expression, start_pos, self.current_token.position)
 
     def parse_expression(self) -> Operand:
-        return self.parse_comma_expression()
+        return self.parse_assignment()
 
     def parse_comma_expression(self) -> Operand:
         start_pos = self.current_token.position
@@ -1202,6 +1234,30 @@ class Parser:
                 arguments.append(self.parse_expression())
         self.expect(TokenType.OPERATOR, ')')
         return FunctionCall(function, arguments, start_pos, self.current_token.position)
+
+    def parse_switch_statement(self) -> SwitchStatement:
+        start_pos = self.current_token.position
+        self.expect(TokenType.KEYWORD, 'switch')
+        self.expect(TokenType.OPERATOR, '(')
+        expression = self.parse_expression()
+        self.expect(TokenType.OPERATOR, ')')
+        body = self.parse_compound_statement()
+        return SwitchStatement(expression, body, start_pos, self.current_token.position)
+
+    def parse_case_statement(self) -> CaseStatement:
+        start_pos = self.current_token.position
+        self.expect(TokenType.KEYWORD, 'case')
+        value = self.parse_expression()
+        self.expect(TokenType.OPERATOR, ':')
+        statement = self.parse_statement()
+        return CaseStatement(value, statement, start_pos, self.current_token.position)
+
+    def parse_default_statement(self) -> CaseStatement:
+        start_pos = self.current_token.position
+        self.expect(TokenType.KEYWORD, 'default')
+        self.expect(TokenType.OPERATOR, ':')
+        statement = self.parse_statement()
+        return CaseStatement(None, statement, start_pos, self.current_token.position)
 
     def advance(self):
         self.current_token = self.lexer.next_token()
