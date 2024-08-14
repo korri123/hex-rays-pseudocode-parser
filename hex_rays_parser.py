@@ -237,12 +237,18 @@ class ASTNode(ABC):
         index = self.children().index(old_child)
         if index == -1:
             raise ValueError(f"Child {old_child} not found")
-        self.children()[index] = new_child
+        old_child = self.children()[index]
+        for key, value in self.__dict__.items():
+            if value == old_child:
+                self.__dict__[key] = new_child
+                break
+        else:
+            raise ValueError(f"Child {old_child} not found")
         new_child.parent = self
 
     def replace_child_at_index(self, index: int, new_child: Self):
-        self.children()[index] = new_child
-        new_child.parent = self
+        old_child = self.children()[index]
+        self.replace_child(old_child, new_child)
 
     def find_node(self, predicate: Callable[[Self], bool]) -> Optional[Self]:
         def dfs(node: ASTNode) -> Optional[ASTNode]:
