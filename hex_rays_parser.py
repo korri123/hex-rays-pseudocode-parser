@@ -817,7 +817,7 @@ class Parser:
         declaration_specifiers = self.parse_declaration_specifiers()
         _type = self.expect(TokenType.IDENTIFIER)
         pointer_count = 0
-        while self.current_token.type == TokenType.OPERATOR and self.current_token.value == '*':
+        while self.is_operator('*'):
             pointer_count += 1
             self.advance()
         return Type(_type.value, declaration_specifiers, pointer_count, _type.position, self.position)
@@ -828,7 +828,7 @@ class Parser:
             param_type = self.parse_type()
             param_name = self.expect(TokenType.IDENTIFIER)
             parameters.append(Parameter(param_type, param_name.value, param_type.begin_pos, param_name.position))
-            if self.current_token.type == TokenType.OPERATOR and self.current_token.value == ',':
+            if self.is_operator(','):
                 self.advance()
         return parameters
 
@@ -883,25 +883,32 @@ class Parser:
                 return False
 
         return self.with_preserved_position(check)
+    
+    def is_operator(self, operator: str) -> bool:
+        return self.current_token.type == TokenType.OPERATOR and self.current_token.value == operator
 
-    def parse_statement(self) -> Statement:        
-        if self.current_token.value == 'if':
-            return self.parse_if_statement()
-        elif self.current_token.value == 'while':
-            return self.parse_while_statement()
-        elif self.current_token.value == 'for':
-            return self.parse_for_statement()
-        elif self.current_token.value == 'switch':
-            return self.parse_switch_statement()
-        elif self.current_token.value == 'goto':
-            return self.parse_goto_statement()
-        elif self.current_token.value == 'return':
-            return self.parse_return_statement()
-        elif self.current_token.value in ('break', 'continue'):
-            return self.parse_jump_statement()
-        elif self.current_token.value in ('case', 'default'):
-            return getattr(self, f'parse_{self.current_token.value}_statement')()
-        elif self.current_token.type == TokenType.OPERATOR and self.current_token.value == '{':
+    def any_of_operators(self, operators: List[str]) -> bool:
+        return self.current_token.type == TokenType.OPERATOR and self.current_token.value in operators
+
+    def is_identifier(self, identifier: str) -> bool:
+        return self.current_token.type == TokenType.IDENTIFIER and self.current_token.value == identifier
+
+    def parse_statement(self) -> Statement:
+        keyword_handlers = {
+            'if': self.parse_if_statement,
+            'while': self.parse_while_statement,
+            'for': self.parse_for_statement,
+            'switch': self.parse_switch_statement,
+            'goto': self.parse_goto_statement,
+            'return': self.parse_return_statement,
+            'break': self.parse_jump_statement,
+            'continue': self.parse_jump_statement,
+            'default': self.parse_default_statement,
+            'case': self.parse_case_statement,
+        }
+        if self.current_token.value in keyword_handlers:
+            return keyword_handlers[self.current_token.value]()
+        elif self.is_operator('{'):
             return self.parse_compound_statement()
         elif self.is_variable_declaration():
             return self.parse_variable_declaration()
@@ -916,7 +923,7 @@ class Parser:
         start_pos = self.current_token.position
         self.expect(TokenType.IDENTIFIER, 'return')
         expression = None
-        if self.current_token.type != TokenType.OPERATOR or self.current_token.value != ';':
+        if not self.is_operator(';'):
             expression = self.parse_expression()
         self.expect(TokenType.OPERATOR, ';')
         return ReturnStatement(expression, start_pos, self.current_token.position)
@@ -952,7 +959,7 @@ class Parser:
         var_type = self.parse_type()
         var_name = self.expect(TokenType.IDENTIFIER)
         initializer = None
-        if self.current_token.type == TokenType.OPERATOR and self.current_token.value == '=':
+        if self.is_operator('='):
             self.advance()
             initializer = self.parse_expression()
         self.expect(TokenType.OPERATOR, ';')
@@ -973,7 +980,7 @@ class Parser:
         self.expect(TokenType.OPERATOR, '(')
         parameters = self.parse_parameters()
         self.expect(TokenType.OPERATOR, ')')
-        if self.current_token.type == TokenType.OPERATOR and self.current_token.value == ';':
+        if self.is_operator(';'):
             body = None
             self.advance()
         else:
@@ -988,7 +995,7 @@ class Parser:
         self.expect(TokenType.OPERATOR, ')')
         then_branch = self.parse_statement()
         else_branch = None
-        if self.current_token.type == TokenType.IDENTIFIER and self.current_token.value == 'else':
+        if self.is_identifier('else'):
             self.advance()
             else_branch = self.parse_statement()
         return IfStatement(condition, then_branch, else_branch, start_pos, self.current_token.position)
@@ -1009,7 +1016,7 @@ class Parser:
         
         # Parse initializer
         initializer = None
-        if self.current_token.type != TokenType.OPERATOR or self.current_token.value != ';':
+        if not self.is_operator(';'):
             if self.is_variable_declaration():
                 initializer = self.parse_variable_declaration()
             else:
@@ -1019,13 +1026,13 @@ class Parser:
 
         # Parse condition
         condition = None
-        if self.current_token.type != TokenType.OPERATOR or self.current_token.value != ';':
+        if not self.is_operator(';'):
             condition = self.parse_expression()
         self.expect(TokenType.OPERATOR, ';')
 
         # Parse increment
         increment = None
-        if self.current_token.type != TokenType.OPERATOR or self.current_token.value != ')':
+        if not self.is_operator(')'):
             increment = self.parse_expression()
         self.expect(TokenType.OPERATOR, ')')
 
@@ -1046,7 +1053,7 @@ class Parser:
     def parse_comma_expression(self) -> Operand:
         start_pos = self.current_token.position
         expr = self.parse_assignment()
-        if self.current_token.type == TokenType.OPERATOR and self.current_token.value == ',':
+        if self.is_operator(','):
             self.advance()
             right = self.parse_expression()
             return CommaOperation(expr, right, start_pos, self.current_token.position)
@@ -1059,7 +1066,7 @@ class Parser:
     def parse_assignment(self) -> Operand:
         start_pos = self.current_token.position
         left = self.parse_logical_or()
-        if self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>=']:
+        if self.any_of_operators(['=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>=']):
             op = self.current_token
             self.advance()
             right = self.parse_assignment()
@@ -1069,7 +1076,7 @@ class Parser:
     def parse_logical_or(self) -> Operand:
         start_pos = self.current_token.position
         expr = self.parse_logical_and()
-        while self.current_token.type == TokenType.OPERATOR and self.current_token.value == '||':
+        while self.is_operator('||'):
             op = self.current_token
             self.advance()
             right = self.parse_logical_and()
@@ -1079,7 +1086,7 @@ class Parser:
     def parse_logical_and(self) -> Operand:
         start_pos = self.current_token.position
         expr = self.parse_bitwise_or()
-        while self.current_token.type == TokenType.OPERATOR and self.current_token.value == '&&':
+        while self.is_operator('&&'):
             op = self.current_token
             self.advance()
             right = self.parse_bitwise_or()
@@ -1089,7 +1096,7 @@ class Parser:
     def parse_bitwise_or(self) -> Operand:
         start_pos = self.current_token.position
         expr = self.parse_bitwise_xor()
-        while self.current_token.type == TokenType.OPERATOR and self.current_token.value == '|':
+        while self.is_operator('|'):
             op = self.current_token
             self.advance()
             right = self.parse_bitwise_xor()
@@ -1099,7 +1106,7 @@ class Parser:
     def parse_bitwise_xor(self) -> Operand:
         start_pos = self.current_token.position
         expr = self.parse_bitwise_and()
-        while self.current_token.type == TokenType.OPERATOR and self.current_token.value == '^':
+        while self.is_operator('^'):
             op = self.current_token
             self.advance()
             right = self.parse_bitwise_and()
@@ -1109,7 +1116,7 @@ class Parser:
     def parse_bitwise_and(self) -> Operand:
         start_pos = self.current_token.position
         expr = self.parse_equality()
-        while self.current_token.type == TokenType.OPERATOR and self.current_token.value == '&':
+        while self.is_operator('&'):
             op = self.current_token
             self.advance()
             right = self.parse_equality()
@@ -1119,7 +1126,7 @@ class Parser:
     def parse_equality(self) -> Operand:
         start_pos = self.current_token.position
         expr = self.parse_relational()
-        while self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['==', '!=']:
+        while self.any_of_operators(['==', '!=']):
             op = self.current_token
             self.advance()
             right = self.parse_relational()
@@ -1129,7 +1136,7 @@ class Parser:
     def parse_relational(self) -> Operand:
         start_pos = self.current_token.position
         expr = self.parse_additive()
-        while self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['<', '>', '<=', '>=']:
+        while self.any_of_operators(['<', '>', '<=', '>=']):
             op = self.current_token
             self.advance()
             right = self.parse_additive()
@@ -1139,7 +1146,7 @@ class Parser:
     def parse_additive(self) -> Operand:
         start_pos = self.current_token.position
         expr = self.parse_multiplicative()
-        while self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['+', '-']:
+        while self.any_of_operators(['+', '-']):
             op = self.current_token
             self.advance()
             right = self.parse_multiplicative()
@@ -1149,7 +1156,7 @@ class Parser:
     def parse_multiplicative(self) -> Operand:
         start_pos = self.current_token.position
         expr = self.parse_unary()
-        while self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['*', '/', '%']:
+        while self.any_of_operators(['*', '/', '%']):
             op = self.current_token
             self.advance()
             right = self.parse_unary()
@@ -1158,7 +1165,7 @@ class Parser:
 
     def parse_unary(self) -> Operand:
         start_pos = self.current_token.position
-        if self.current_token.type == TokenType.OPERATOR and self.current_token.value in ['-', '!', '*', '&', '~', '++', '--']:
+        if self.any_of_operators(['-', '!', '*', '&', '~', '++', '--']):
             op = self.current_token
             self.advance()
             expr = self.parse_unary()
@@ -1170,22 +1177,22 @@ class Parser:
         start_pos = expr.begin_pos
 
         while self.current_token.type == TokenType.OPERATOR:
-            if self.current_token.value in ['++', '--']:
+            if self.any_of_operators(['++', '--']):
                 op = self.current_token
                 self.advance()
                 expr = UnaryOperation(op.value, expr, True, start_pos, self.current_token.position)
-            elif self.current_token.value == '(':
+            elif self.is_operator('('):
                 expr = self.parse_function_call(expr, start_pos)
-            elif self.current_token.value == '[':
+            elif self.is_operator('['):
                 self.advance()
                 index = self.parse_expression()
                 self.expect(TokenType.OPERATOR, ']')
                 expr = ArrayAccess(expr, index, start_pos, self.current_token.position)
-            elif self.current_token.value == '.':
+            elif self.is_operator('.'):
                 self.advance()
                 member = self.parse_primary()
                 expr = MemberAccess(expr, member, start_pos, self.current_token.position)
-            elif self.current_token.value == '->':
+            elif self.is_operator('->'):
                 self.advance()
                 member = self.parse_primary()
                 expr = PointerAccess(expr, member, start_pos, self.current_token.position)
@@ -1206,7 +1213,7 @@ class Parser:
             name = self.current_token.value
             self.advance()
             expr = Identifier(name, start_pos, self.current_token.position)
-        elif self.current_token.type == TokenType.OPERATOR and self.current_token.value == '(':
+        elif self.is_operator('('):
             self.advance()
             expr = self.parse_expression()
             self.expect(TokenType.OPERATOR, ')')
@@ -1222,9 +1229,9 @@ class Parser:
     def parse_function_call(self, function: Operand, start_pos: int) -> FunctionCall:
         self.expect(TokenType.OPERATOR, '(')
         arguments = []
-        if self.current_token.type != TokenType.OPERATOR or self.current_token.value != ')':
+        if not self.is_operator(')'):
             arguments.append(self.parse_expression())
-            while self.current_token.type == TokenType.OPERATOR and self.current_token.value == ',':
+            while self.is_operator(','):
                 self.advance()
                 arguments.append(self.parse_argument())
         self.expect(TokenType.OPERATOR, ')')
@@ -1238,7 +1245,7 @@ class Parser:
         self.expect(TokenType.OPERATOR, ')')
         body = self.parse_compound_statement()
         return SwitchStatement(expression, body, start_pos, self.current_token.position)
-
+    
     def parse_case_statement(self) -> CaseStatement:
         start_pos = self.current_token.position
         self.expect(TokenType.IDENTIFIER, 'case')
