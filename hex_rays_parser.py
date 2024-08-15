@@ -258,6 +258,16 @@ class ASTNode(ABC):
         
         return dfs(self)
     
+    def find_nodes(self, predicate: Callable[[Self], bool]) -> List[Self]:
+        nodes = []
+        def dfs(node: ASTNode):
+            if predicate(node):
+                nodes.append(node)
+            for child in node.children():
+                dfs(child)
+        dfs(self)
+        return nodes
+    
     def transform(self, transformation: Callable[[Self], Optional[Self]]) -> None:
         def dfs(node: ASTNode) -> Optional[ASTNode]:
             result = transformation(node)
@@ -750,7 +760,7 @@ class CaseStatement(Statement):
         self.statement: Statement = statement
     
     def __str__(self):
-        if self.value is None:
+        if self.is_default_statement():
             return f"default:\n    {self.statement}"
         return f"case {self.value}:\n    {self.statement}"
 
@@ -759,6 +769,9 @@ class CaseStatement(Statement):
         if self.value:
             children.insert(0, self.value)
         return children
+    
+    def is_default_statement(self):
+        return self.value is None
 
 class ParserException(Exception):
     pass
