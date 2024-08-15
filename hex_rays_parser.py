@@ -506,32 +506,19 @@ class ForStatement(Statement):
         children.append(self.body)
         return children
 
-class ReturnStatement(Statement):
-    def __init__(self, expression: Optional[Operand], begin_pos: int, end_pos: int):
+class JumpStatement(Statement):
+    def __init__(self, jump_type: str, expression: Optional[Operand], begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
+        self.jump_type: str = jump_type
         self.expression: Optional[Operand] = expression
     
     def __str__(self):
         if self.expression:
-            return f"return {self.expression};"
-        return "return;"
+            return f"{self.jump_type} {self.expression};"
+        return f"{self.jump_type};"
 
     def children(self) -> List[ASTNode]:
         return [self.expression] if self.expression else []
-
-class BreakStatement(Statement):
-    def __init__(self, begin_pos: int, end_pos: int):
-        super().__init__(begin_pos, end_pos)
-
-    def __str__(self):
-        return "break;"
-
-class ContinueStatement(Statement):
-    def __init__(self, begin_pos: int, end_pos: int):
-        super().__init__(begin_pos, end_pos)
-
-    def __str__(self):
-        return "continue;"
 
 class BinaryOperation(Operand):
     def __init__(self, left: Operand, operator: str, right: Operand, begin_pos: int, end_pos: int):
@@ -904,48 +891,32 @@ class Parser:
         return self.with_preserved_position(check)
 
     def parse_statement(self) -> Statement:        
-        if self.current_token.value == 'if':
-            return self.parse_if_statement()
-        elif self.current_token.value == 'while':
-            return self.parse_while_statement()
-        elif self.current_token.value == 'for':
-            return self.parse_for_statement()
-        elif self.current_token.value == 'return':
-            return self.parse_return_statement()
-        elif self.current_token.value == 'switch':
-            return self.parse_switch_statement()
-        elif self.current_token.value == 'case':
-            return self.parse_case_statement()
-        elif self.current_token.value == 'default':
-            return self.parse_default_statement()
-        elif self.current_token.value == 'break':
-            return self.parse_break_statement()
+        if self.current_token.value in ('if', 'while', 'for', 'switch', 'goto'):
+            return getattr(self, f'parse_{self.current_token.value}_statement')()
+        elif self.current_token.value in ('return', 'break', 'continue'):
+            return self.parse_jump_statement()
+        elif self.current_token.value in ('case', 'default'):
+            return getattr(self, f'parse_{self.current_token.value}_statement')()
         elif self.current_token.type == TokenType.OPERATOR and self.current_token.value == '{':
             return self.parse_compound_statement()
-        elif self.current_token.value == 'continue':
-            return self.parse_continue_statement()
         elif self.is_variable_declaration():
             return self.parse_variable_declaration()
         elif self.is_function_declaration():
             return self.parse_function_declaration()
-        elif self.current_token.value == 'goto':
-            return self.parse_goto_statement()
         elif self.is_label():
             return self.parse_label_statement()
         else:
             return self.parse_expression_statement()
 
-    def parse_break_statement(self) -> BreakStatement:
+    def parse_jump_statement(self) -> JumpStatement:
         start_pos = self.current_token.position
-        self.expect(TokenType.KEYWORD, 'break')
+        jump_type = self.current_token.value
+        self.advance()
+        expression = None
+        if jump_type == 'return' and (self.current_token.type != TokenType.OPERATOR or self.current_token.value != ';'):
+            expression = self.parse_expression()
         self.expect(TokenType.OPERATOR, ';')
-        return BreakStatement(start_pos, self.current_token.position)
-    
-    def parse_continue_statement(self) -> ContinueStatement:
-        start_pos = self.current_token.position
-        self.expect(TokenType.KEYWORD, 'continue')
-        self.expect(TokenType.OPERATOR, ';')
-        return ContinueStatement(start_pos, self.current_token.position)
+        return JumpStatement(jump_type, expression, start_pos, self.current_token.position)
 
     def parse_goto_statement(self) -> GotoStatement:
         start_pos = self.current_token.position
@@ -1052,15 +1023,6 @@ class Parser:
         body = self.parse_statement()
 
         return ForStatement(initializer, condition, increment, body, start_pos, self.current_token.position)
-
-    def parse_return_statement(self) -> ReturnStatement:
-        start_pos = self.current_token.position
-        self.expect(TokenType.KEYWORD, 'return')
-        expression = None
-        if self.current_token.type != TokenType.OPERATOR or self.current_token.value != ';':
-            expression = self.parse_expression()
-        self.expect(TokenType.OPERATOR, ';')
-        return ReturnStatement(expression, start_pos, self.current_token.position)
 
     def parse_expression_statement(self) -> ExpressionStatement:
         start_pos = self.current_token.position
