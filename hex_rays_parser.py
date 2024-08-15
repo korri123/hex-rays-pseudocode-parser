@@ -1106,7 +1106,7 @@ class Parser:
 
     def parse_logical_and(self) -> Operand:
         start_pos = self.current_token.position
-        expr = self.parse_equality()
+        expr = self.parse_bitwise_or()
         while self.current_token.type == TokenType.OPERATOR and self.current_token.value == '&&':
             op = self.current_token
             self.advance()
