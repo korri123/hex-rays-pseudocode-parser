@@ -255,6 +255,11 @@ class ExpressionStatement(Statement):
     def children(self) -> List[ASTNode]:
         return [self.expression]
 
+def _indent(operand: Statement):
+    if isinstance(operand, CompoundStatement):
+        return str(operand)
+    return '\n'.join('    ' + line for line in str(operand).split('\n'))
+
 class IfStatement(Statement):
     def __init__(self, condition: Operand, then_branch: Statement, else_branch: Optional[Statement], begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
@@ -263,20 +268,15 @@ class IfStatement(Statement):
         self.else_branch: Optional[Statement] = else_branch
     
     def __str__(self):
-        result = f"if ({self.condition})\n{self._indent(self.then_branch)}"
+        result = f"if ({self.condition})\n{_indent(self.then_branch)}"
         current_else = self.else_branch
         while isinstance(current_else, IfStatement):
-            result += f"\nelse if ({current_else.condition})\n{self._indent(current_else.then_branch)}"
+            result += f"\nelse if ({current_else.condition})\n{_indent(current_else.then_branch)}"
             current_else = current_else.else_branch
         if current_else:
-            result += f"\nelse\n{self._indent(current_else)}"
+            result += f"\nelse\n{_indent(current_else)}"
         return result
     
-    def _indent(self, operand: Statement):
-        if isinstance(operand, CompoundStatement):
-            return str(operand)
-        return '\n'.join('    ' + line for line in str(operand).split('\n'))
-
     def children(self) -> List[ASTNode]:
         children = [self.condition, self.then_branch]
         if self.else_branch:
@@ -573,7 +573,7 @@ class SwitchStatement(Statement):
         self.cases: List['CaseStatement'] = cases
     
     def __str__(self):
-        cases_str = '\n'.join(str(case) for case in self.cases)
+        cases_str = '\n'.join(_indent(case) for case in self.cases)
         return f"switch ({self.expression}) {{\n{cases_str}\n}}"
 
     def children(self) -> List[ASTNode]:
@@ -589,8 +589,12 @@ class CaseStatement(Statement):
         prefix = "default:" if self.is_default_statement() else f"case {self.value}:"
         if not self.statements:
             return prefix
-        statements_str = '\n'.join('    ' + str(stmt) for stmt in self.statements)
-        return f"{prefix}\n{statements_str}"
+        statement_strs = [ _indent(stmt) for stmt in self.statements]
+        for i, stmt_str in enumerate(statement_strs):
+            if isinstance(self.statements[i], LabelStatement):
+                statement_strs[i] = stmt_str.strip()
+        NEW_LINE = '\n'
+        return f"{prefix}\n{NEW_LINE.join(statement_strs)}"
 
     def children(self) -> List[ASTNode]:
         children = cast(List[ASTNode], self.statements.copy())
