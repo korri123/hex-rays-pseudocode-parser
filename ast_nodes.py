@@ -15,10 +15,6 @@ class ASTNode(ABC):
         pass
 
     def replace_child(self, old_child: 'ASTNode', new_child: 'ASTNode'):
-        index = self.children().index(old_child)
-        if index == -1:
-            raise ValueError(f"Child {old_child} not found")
-        old_child = self.children()[index]
         for key, value in self.__dict__.items():
             if value is old_child:
                 self.__dict__[key] = new_child
@@ -81,6 +77,16 @@ class Program(ASTNode):
         self.statements: List[Statement] = statements
         self.comments: List[Token] = comments
     
+    def replace_child(self, old_child: ASTNode, new_child: ASTNode):
+        if not isinstance(new_child, Statement):
+            raise ValueError(f"New child {new_child} is not a Statement")  
+        try:
+            index = self.statements.index(cast(Statement, old_child))
+            self.statements[index] = cast(Statement, new_child)
+            new_child.parent = self
+        except ValueError:
+            raise ValueError(f"Child {old_child} not found")
+
     def __str__(self):
         result = self._get_declarations_string()
         if not self.comments:
@@ -154,6 +160,16 @@ class CompoundStatement(Statement):
     def __init__(self, statements: List[Statement], begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
         self.statements: List[Statement] = statements
+
+    def replace_child(self, old_child: ASTNode, new_child: ASTNode):
+        if not isinstance(new_child, Statement):
+            raise ValueError(f"New child {new_child} is not a Statement")
+        try:
+            index = self.statements.index(cast(Statement, old_child))
+            self.statements[index] = cast(Statement, new_child)
+            new_child.parent = self
+        except ValueError:
+            raise ValueError(f"Child {old_child} not found")
     
     def __str__(self):
         stmt_strs = []
@@ -189,6 +205,18 @@ class FunctionDeclaration(Statement):
         self.parameters: List[Parameter] = parameters
         self.body: Optional[CompoundStatement] = body
         self.calling_convention: Optional[str] = calling_convention
+
+    def replace_child(self, old_child: ASTNode, new_child: ASTNode):
+        if not isinstance(new_child, Parameter) and isinstance(old_child, Parameter):
+            raise ValueError(f"New child {new_child} is not a Parameter")
+        try:
+            index = self.parameters.index(cast(Parameter, old_child))
+            self.parameters[index] = cast(Parameter, new_child)
+            new_child.parent = self
+            return
+        except ValueError:
+            pass
+        super().replace_child(old_child, new_child)
     
     def __str__(self):
         params = ', '.join(str(param) for param in self.parameters)
@@ -461,8 +489,8 @@ class Identifier(Operand):
 class FunctionCall(Operand):
     def __init__(self, function: Operand, arguments: List[Operand], begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
-        self.function = function
-        self.arguments = arguments
+        self.function: Operand = function
+        self.arguments: List[Operand] = arguments
     
     def __str__(self):
         if not self.arguments:
@@ -475,6 +503,18 @@ class FunctionCall(Operand):
     def children(self) -> List[ASTNode]:
         children: List[ASTNode] = [self.function]
         return children + self.arguments
+    
+    def replace_child(self, old_child: ASTNode, new_child: ASTNode):
+        if not isinstance(new_child, Operand):
+            raise ValueError(f"New child {new_child} is not an Operand")
+        try:
+            arg = self.arguments.index(cast(Operand, old_child))
+            self.arguments[arg] = cast(Operand, new_child)
+            new_child.parent = self
+            return
+        except ValueError:
+            pass
+        super().replace_child(old_child, new_child)
 
 class VariableDeclaration(Statement):
     def __init__(self, type: Type, name: str, initializer: Optional[Operand], begin_pos: int, end_pos: int):
