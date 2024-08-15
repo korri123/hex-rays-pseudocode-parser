@@ -6,32 +6,32 @@ from lexer import Token, TokenType
 
 class ASTNode(ABC):
     def __init__(self, begin_pos: int, end_pos: int):
-        self.begin_pos: int = begin_pos
-        self.end_pos: int = end_pos
+        self._begin_pos: int = begin_pos
+        self._end_pos: int = end_pos
         self.parent: Optional[ASTNode] = None
 
     @abstractmethod
-    def children(self) -> List[Self]:
+    def children(self) -> List['ASTNode']:
         pass
 
-    def replace_child(self, old_child: Self, new_child: Self):
+    def replace_child(self, old_child: 'ASTNode', new_child: 'ASTNode'):
         index = self.children().index(old_child)
         if index == -1:
             raise ValueError(f"Child {old_child} not found")
         old_child = self.children()[index]
         for key, value in self.__dict__.items():
-            if value == old_child:
+            if value is old_child:
                 self.__dict__[key] = new_child
                 break
         else:
             raise ValueError(f"Child {old_child} not found")
         new_child.parent = self
 
-    def replace_child_at_index(self, index: int, new_child: Self):
+    def replace_child_at_index(self, index: int, new_child: 'ASTNode'):
         old_child = self.children()[index]
         self.replace_child(old_child, new_child)
 
-    def find_node(self, predicate: Callable[[Self], bool]) -> Optional[Self]:
+    def find_node(self, predicate: Callable[['ASTNode'], bool]) -> Optional['ASTNode']:
         def dfs(node: ASTNode) -> Optional[ASTNode]:
             if predicate(node):
                 return node
@@ -43,9 +43,9 @@ class ASTNode(ABC):
         
         return dfs(self)
     
-    def find_nodes(self, predicate: Callable[[Self], bool]) -> List[Self]:
+    def find_nodes(self, predicate: Callable[['ASTNode'], bool]) -> List['ASTNode']:
         nodes = []
-        def dfs(node: ASTNode):
+        def dfs(node: 'ASTNode'):
             if predicate(node):
                 nodes.append(node)
             for child in node.children():
@@ -53,7 +53,7 @@ class ASTNode(ABC):
         dfs(self)
         return nodes
     
-    def transform(self, transformation: Callable[[Self], Optional[Self]]) -> None:
+    def transform(self, transformation: Callable[['ASTNode'], Optional['ASTNode']]) -> None:
         def dfs(node: ASTNode) -> Optional[ASTNode]:
             result = transformation(node)
             if result is not None:
@@ -62,14 +62,21 @@ class ASTNode(ABC):
             for i, child in enumerate(node.children()):
                 new_child = dfs(child)
                 if new_child is not None and new_child is not child:
-                    node.replace_child_at_index(i, new_child)
+                    node.replace_child(child, new_child)
             
             return None
         
         dfs(self)
 
+class Statement(ASTNode):
+    def __init__(self, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
+
+    def children(self) -> List[ASTNode]:
+        return []
+
 class Program(ASTNode):
-    def __init__(self, statements, comments, begin_pos: int, end_pos: int):
+    def __init__(self, statements: List[Statement], comments: List[Token], begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
         self.statements: List[Statement] = statements
         self.comments: List[Token] = comments
@@ -123,13 +130,6 @@ class Program(ASTNode):
 
     def children(self) -> List[ASTNode]:
         return cast(List[ASTNode], self.statements)
-
-class Statement(ASTNode):
-    def __init__(self, begin_pos: int, end_pos: int):
-        super().__init__(begin_pos, end_pos)
-
-    def children(self) -> List[ASTNode]:
-        return []
 
 class Type(ASTNode):
     def __init__(self, name: str, specifiers: List[str], pointer_count: Optional[int], begin_pos: int, end_pos: int):

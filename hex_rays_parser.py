@@ -69,7 +69,7 @@ class Parser:
         while self.current_token.type != TokenType.OPERATOR or self.current_token.value != ')':
             param_type = self.parse_type()
             param_name = self.expect(TokenType.IDENTIFIER)
-            parameters.append(Parameter(param_type, param_name.value, param_type.begin_pos, param_name.position))
+            parameters.append(Parameter(param_type, param_name.value, param_type._begin_pos, param_name.position))
             if self.is_operator(','):
                 self.advance()
         return parameters
@@ -416,7 +416,7 @@ class Parser:
 
     def parse_postfix(self) -> Operand:
         expr = self.parse_primary()
-        start_pos = expr.begin_pos
+        start_pos = expr._begin_pos
 
         while self.current_token.type == TokenType.OPERATOR:
             if self.any_of_operators(['++', '--']):
