@@ -145,7 +145,6 @@ class Parser:
             'return': self.parse_return_statement,
             'break': self.parse_jump_statement,
             'continue': self.parse_jump_statement,
-            'default': self.parse_default_statement,
             'case': self.parse_case_statement,
         }
         if self.current_token.value in keyword_handlers:
@@ -485,23 +484,31 @@ class Parser:
         self.expect(TokenType.OPERATOR, '(')
         expression = self.parse_expression()
         self.expect(TokenType.OPERATOR, ')')
-        body = self.parse_compound_statement()
-        return SwitchStatement(expression, body, start_pos, self.current_token.position)
+        self.expect(TokenType.OPERATOR, '{')
+        cases = []
+        while not self.is_operator('}'):
+            cases.append(self.parse_case_statement())
+        self.expect(TokenType.OPERATOR, '}')
+        return SwitchStatement(expression, cases, start_pos, self.current_token.position)
     
     def parse_case_statement(self) -> CaseStatement:
         start_pos = self.current_token.position
-        self.expect(TokenType.IDENTIFIER, 'case')
-        value = self.parse_expression()
-        self.expect(TokenType.OPERATOR, ':')
-        statement = self.parse_statement()
-        return CaseStatement(value, statement, start_pos, self.current_token.position)
-
-    def parse_default_statement(self) -> CaseStatement:
-        start_pos = self.current_token.position
-        self.expect(TokenType.IDENTIFIER, 'default')
-        self.expect(TokenType.OPERATOR, ':')
-        statement = self.parse_statement()
-        return CaseStatement(None, statement, start_pos, self.current_token.position)
+        if self.is_identifier('case'):
+            self.advance()
+            value = self.parse_expression()
+            self.expect(TokenType.OPERATOR, ':')
+        elif self.is_identifier('default'):
+            self.advance()
+            self.expect(TokenType.OPERATOR, ':')
+            value = None
+        else:
+            raise self.error("Expected 'case' or 'default'")
+        
+        statements = []
+        while not (self.is_identifier('case') or self.is_identifier('default') or self.is_operator('}')):
+            statements.append(self.parse_statement())
+        
+        return CaseStatement(value, statements, start_pos, self.current_token.position)
 
     def advance(self):
         self.current_token = self.lexer.next_token()

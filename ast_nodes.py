@@ -135,7 +135,7 @@ class Program(ASTNode):
         return result
 
     def children(self) -> List[ASTNode]:
-        return cast(List[ASTNode], self.statements)
+        return cast(List[ASTNode], self.statements.copy())
 
 class Type(ASTNode):
     def __init__(self, name: str, specifiers: List[str], pointer_count: Optional[int], begin_pos: int, end_pos: int):
@@ -183,7 +183,7 @@ class CompoundStatement(Statement):
         return f"{{\n{NEW_LINE.join(stmt_strs)}\n}}"
 
     def children(self) -> List[ASTNode]:
-        return cast(List[ASTNode], self.statements)
+        return cast(List[ASTNode], self.statements.copy())
 
 class Parameter(ASTNode):
     def __init__(self, type: Type, name: str, begin_pos: int, end_pos: int):
@@ -567,30 +567,33 @@ class CommaOperation(BinaryOperation):
         return cast(List[ASTNode], [self.left, self.right])
 
 class SwitchStatement(Statement):
-    def __init__(self, expression: Operand, body: CompoundStatement, begin_pos: int, end_pos: int):
+    def __init__(self, expression: Operand, cases: List['CaseStatement'], begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
         self.expression: Operand = expression
-        self.body: CompoundStatement = body
+        self.cases: List['CaseStatement'] = cases
     
     def __str__(self):
-        return f"switch ({self.expression})\n{self.body}"
+        cases_str = '\n'.join(str(case) for case in self.cases)
+        return f"switch ({self.expression}) {{\n{cases_str}\n}}"
 
     def children(self) -> List[ASTNode]:
-        return [self.expression, self.body]
+        return [self.expression] + cast(List[ASTNode], self.cases)
 
 class CaseStatement(Statement):
-    def __init__(self, value: Optional[Operand], statement: Statement, begin_pos: int, end_pos: int):
+    def __init__(self, value: Optional[Operand], statements: List[Statement], begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
         self.value: Optional[Operand] = value
-        self.statement: Statement = statement
+        self.statements: List[Statement] = statements
     
     def __str__(self):
-        if self.is_default_statement():
-            return f"default:\n    {self.statement}"
-        return f"case {self.value}:\n    {self.statement}"
+        prefix = "default:" if self.is_default_statement() else f"case {self.value}:"
+        if not self.statements:
+            return prefix
+        statements_str = '\n'.join('    ' + str(stmt) for stmt in self.statements)
+        return f"{prefix}\n{statements_str}"
 
     def children(self) -> List[ASTNode]:
-        children = cast(List[ASTNode], [self.statement])
+        children = cast(List[ASTNode], self.statements.copy())
         if self.value:
             children.insert(0, self.value)
         return children
