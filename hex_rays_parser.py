@@ -11,10 +11,10 @@ class Parser:
             self.lexer = Lexer()
         else:
             self.lexer = lexer
-        
+
         if code:
             self.lexer.set_code(code)
-        
+
         self.current_token: Token = self.lexer.next_token()
         self._comments: List[Token] = []
         self._rest: str = self.lexer.code[self.lexer.position:]
@@ -32,18 +32,121 @@ class Parser:
     def _dbg_token(self):
         return (self.current_token.value, self.current_token.type)
     
+    def advance(self):
+        self.current_token = self.lexer.next_token()
+        while self.current_token.type in (TokenType.LINE_COMMENT, TokenType.BLOCK_COMMENT):
+            self._comments.append(self.current_token)
+            self.current_token = self.lexer.next_token()
+        self.position = self.current_token.position
+        self._rest = self.lexer.code[self.position:]
+
+    def expect(self, token_type: TokenType, value: Optional[str] = None) -> Token:
+        if self.current_token.type != token_type:
+            raise self.error(f"Expected token type {token_type}, but got {self.current_token.type}")
+        if value is not None and self.current_token.value != value:
+            raise self.error(f"Expected token value '{value}', but got '{self.current_token.value}'")
+        token = self.current_token
+        self.advance()
+        return token
+
+    def error(self, message: str):
+        return ParserException(f"Parser error: {message}")
+
     def parse(self) -> Program:
         declarations = []
         while self.current_token.type != TokenType.EOF:
             declarations.append(self.parse_statement())
         program = Program(declarations, self._comments, 0, self.position)
-        self.assign_parents(program)
+        self._assign_parents(program)
         return program
 
-    def assign_parents(self, node: ASTNode):
+    def _assign_parents(self, node: ASTNode):
         for child in node.children():
             child.parent = node
-            self.assign_parents(child)
+            self._assign_parents(child)
+
+    def push_position(self):
+        state = (self.lexer.position, self.current_token, self._comments.copy())
+        self._position_stack.append(state)
+
+    def pop_position(self):
+        if not self._position_stack:
+            raise ParserException("Attempted to pop from an empty position stack")
+        position, token, comments = self._position_stack.pop()
+        self.lexer.position = position
+        self.current_token = token
+        self._comments = comments
+        self._rest = self.lexer.code[self.lexer.position:]
+
+    def with_preserved_position(self, func):
+        self.push_position()
+        try:
+            return func()
+        finally:
+            self.pop_position()
+
+    def is_operator(self, operator: str) -> bool:
+        return self.current_token.type == TokenType.OPERATOR and self.current_token.value == operator
+
+    def any_of_operators(self, operators: List[str]) -> bool:
+        return self.current_token.type == TokenType.OPERATOR and self.current_token.value in operators
+
+    def is_identifier(self, identifier: str) -> bool:
+        return self.current_token.type == TokenType.IDENTIFIER and self.current_token.value == identifier
+    
+    def expect_identifier(self, identifier: str) -> Token:
+        return self.expect(TokenType.IDENTIFIER, identifier)
+    
+    def expect_operator(self, operator: str) -> Token:
+        return self.expect(TokenType.OPERATOR, operator)
+
+    def parse_statement(self) -> Statement:
+        keyword_handlers = {
+            'if': self.parse_if_statement,
+            'while': self.parse_while_statement,
+            'for': self.parse_for_statement,
+            'switch': self.parse_switch_statement,
+            'goto': self.parse_goto_statement,
+            'return': self.parse_return_statement,
+            'break': self.parse_jump_statement,
+            'continue': self.parse_jump_statement,
+            'case': self.parse_case_statement,
+        }
+        if self.current_token.value in keyword_handlers:
+            return keyword_handlers[self.current_token.value]()
+        elif self.is_operator('{'):
+            return self.parse_compound_statement()
+        elif self.is_variable_declaration():
+            return self.parse_variable_declaration()
+        elif self.is_function_declaration():
+            return self.parse_function_declaration()
+        elif self.is_label():
+            return self.parse_label_statement()
+        else:
+            return self.parse_expression_statement()
+
+    def is_variable_declaration(self) -> bool:
+        def check():
+            try:
+                self.parse_type()
+                self.expect(TokenType.IDENTIFIER)  # name
+                operator = self.expect(TokenType.OPERATOR)
+                return operator.value in ('=', ';')
+            except ParserException:
+                return False
+
+        return self.with_preserved_position(check)
+
+    def is_function_declaration(self) -> bool:
+        def check():
+            try:
+                self.parse_function_signature()
+                self.expect_operator('(')
+                return True
+            except ParserException:
+                return False
+
+        return self.with_preserved_position(check)
 
     def parse_declaration_specifiers(self) -> List[str]:
         specifiers = []
@@ -76,111 +179,34 @@ class Parser:
 
     def parse_compound_statement(self) -> CompoundStatement:
         start_pos = self.current_token.position
-        self.expect(TokenType.OPERATOR, '{')
+        self.expect_operator('{')
         statements = []
         while self.current_token.type != TokenType.OPERATOR or self.current_token.value != '}':
             statements.append(self.parse_statement())
-        self.expect(TokenType.OPERATOR, '}')
+        self.expect_operator('}')
         return CompoundStatement(statements, start_pos, self.current_token.position)
-    
-    def push_position(self):
-        state = (self.lexer.position, self.current_token, self._comments.copy())
-        self._position_stack.append(state)
-
-    def pop_position(self):
-        if not self._position_stack:
-            raise ParserException("Attempted to pop from an empty position stack")
-        position, token, comments = self._position_stack.pop()
-        self.lexer.position = position
-        self.current_token = token
-        self._comments = comments
-        self._rest = self.lexer.code[self.lexer.position:]
-
-    def with_preserved_position(self, func):
-        self.push_position()
-        try:
-            return func()
-        finally:
-            self.pop_position()
-
-    def is_variable_declaration(self) -> bool:
-        def check():
-            try:
-                self.parse_type()
-                self.expect(TokenType.IDENTIFIER)  # name
-                operator = self.expect(TokenType.OPERATOR)
-                return operator.value in ('=', ';')
-            except ParserException:
-                return False
-
-        return self.with_preserved_position(check)
-
-    def is_function_declaration(self) -> bool:
-        def check():
-            try:
-                self.parse_function_signature()
-                self.expect(TokenType.OPERATOR, '(')
-                return True
-            except ParserException:
-                return False
-
-        return self.with_preserved_position(check)
-    
-    def is_operator(self, operator: str) -> bool:
-        return self.current_token.type == TokenType.OPERATOR and self.current_token.value == operator
-
-    def any_of_operators(self, operators: List[str]) -> bool:
-        return self.current_token.type == TokenType.OPERATOR and self.current_token.value in operators
-
-    def is_identifier(self, identifier: str) -> bool:
-        return self.current_token.type == TokenType.IDENTIFIER and self.current_token.value == identifier
-
-    def parse_statement(self) -> Statement:
-        keyword_handlers = {
-            'if': self.parse_if_statement,
-            'while': self.parse_while_statement,
-            'for': self.parse_for_statement,
-            'switch': self.parse_switch_statement,
-            'goto': self.parse_goto_statement,
-            'return': self.parse_return_statement,
-            'break': self.parse_jump_statement,
-            'continue': self.parse_jump_statement,
-            'case': self.parse_case_statement,
-        }
-        if self.current_token.value in keyword_handlers:
-            return keyword_handlers[self.current_token.value]()
-        elif self.is_operator('{'):
-            return self.parse_compound_statement()
-        elif self.is_variable_declaration():
-            return self.parse_variable_declaration()
-        elif self.is_function_declaration():
-            return self.parse_function_declaration()
-        elif self.is_label():
-            return self.parse_label_statement()
-        else:
-            return self.parse_expression_statement()
 
     def parse_return_statement(self) -> ReturnStatement:
         start_pos = self.current_token.position
-        self.expect(TokenType.IDENTIFIER, 'return')
+        self.expect_identifier('return')
         expression = None
         if not self.is_operator(';'):
             expression = self.parse_expression()
-        self.expect(TokenType.OPERATOR, ';')
+        self.expect_operator(';')
         return ReturnStatement(expression, start_pos, self.current_token.position)
 
     def parse_jump_statement(self) -> JumpStatement:
         start_pos = self.current_token.position
         jump_type = self.current_token.value
         self.advance()
-        self.expect(TokenType.OPERATOR, ';')
+        self.expect_operator(';')
         return JumpStatement(jump_type, start_pos, self.current_token.position)
 
     def parse_goto_statement(self) -> GotoStatement:
         start_pos = self.current_token.position
-        self.expect(TokenType.IDENTIFIER, 'goto')
+        self.expect_identifier('goto')
         label = self.expect(TokenType.IDENTIFIER)
-        self.expect(TokenType.OPERATOR, ';')
+        self.expect_operator(';')
         return GotoStatement(label.value, start_pos, self.current_token.position)
 
     def is_label(self) -> bool:
@@ -192,7 +218,7 @@ class Parser:
     def parse_label_statement(self) -> LabelStatement:
         start_pos = self.current_token.position
         label = self.expect(TokenType.IDENTIFIER)
-        self.expect(TokenType.OPERATOR, ':')
+        self.expect_operator(':')
         return LabelStatement(label.value, start_pos, self.current_token.position)
 
     def parse_variable_declaration(self) -> VariableDeclaration:
@@ -203,7 +229,7 @@ class Parser:
         if self.is_operator('='):
             self.advance()
             initializer = self.parse_expression()
-        self.expect(TokenType.OPERATOR, ';')
+        self.expect_operator(';')
         return VariableDeclaration(var_type, var_name.value, initializer, start_pos, self.current_token.position)
 
     def parse_function_signature(self) -> Tuple[Type, Token, Optional[str]]:
@@ -218,9 +244,9 @@ class Parser:
     def parse_function_declaration(self) -> FunctionDeclaration:
         start_pos = self.current_token.position
         _type, _name, calling_convention = self.parse_function_signature()
-        self.expect(TokenType.OPERATOR, '(')
+        self.expect_operator('(')
         parameters = self.parse_parameters()
-        self.expect(TokenType.OPERATOR, ')')
+        self.expect_operator(')')
         if self.is_operator(';'):
             body = None
             self.advance()
@@ -230,10 +256,10 @@ class Parser:
 
     def parse_if_statement(self) -> IfStatement:
         start_pos = self.current_token.position
-        self.expect(TokenType.IDENTIFIER, 'if')
-        self.expect(TokenType.OPERATOR, '(')
+        self.expect_identifier('if')
+        self.expect_operator('(')
         condition = self.parse_comma_expression()
-        self.expect(TokenType.OPERATOR, ')')
+        self.expect_operator(')')
         then_branch = self.parse_statement()
         else_branch = None
         if self.is_identifier('else'):
@@ -243,17 +269,17 @@ class Parser:
 
     def parse_while_statement(self) -> WhileStatement:
         start_pos = self.current_token.position
-        self.expect(TokenType.IDENTIFIER, 'while')
-        self.expect(TokenType.OPERATOR, '(')
+        self.expect_identifier('while')
+        self.expect_operator('(')
         condition = self.parse_expression()
-        self.expect(TokenType.OPERATOR, ')')
+        self.expect_operator(')')
         body = self.parse_statement()
         return WhileStatement(condition, body, start_pos, self.current_token.position)
 
     def parse_for_statement(self) -> ForStatement:
         start_pos = self.current_token.position
-        self.expect(TokenType.IDENTIFIER, 'for')
-        self.expect(TokenType.OPERATOR, '(')
+        self.expect_identifier('for')
+        self.expect_operator('(')
         
         # Parse initializer
         initializer = None
@@ -269,23 +295,66 @@ class Parser:
         condition = None
         if not self.is_operator(';'):
             condition = self.parse_expression()
-        self.expect(TokenType.OPERATOR, ';')
+        self.expect_operator(';')
 
         # Parse increment
         increment = None
         if not self.is_operator(')'):
             increment = self.parse_expression()
-        self.expect(TokenType.OPERATOR, ')')
+        self.expect_operator(')')
 
         # Parse body
         body = self.parse_statement()
 
         return ForStatement(initializer, condition, increment, body, start_pos, self.current_token.position)
 
+    def parse_function_call(self, function: Operand, start_pos: int) -> FunctionCall:
+        self.expect_operator('(')
+        arguments = []
+        if not self.is_operator(')'):
+            arguments.append(self.parse_expression())
+            while self.is_operator(','):
+                self.advance()
+                arguments.append(self.parse_argument())
+        self.expect_operator(')')
+        return FunctionCall(function, arguments, start_pos, self.current_token.position)
+
+    def parse_switch_statement(self) -> SwitchStatement:
+        start_pos = self.current_token.position
+        self.expect_identifier('switch')
+        self.expect_operator('(')
+        expression = self.parse_expression()
+        self.expect_operator(')')
+        self.expect_operator('{')
+        cases = []
+        while not self.is_operator('}'):
+            cases.append(self.parse_case_statement())
+        self.expect_operator('}')
+        return SwitchStatement(expression, cases, start_pos, self.current_token.position)
+    
+    def parse_case_statement(self) -> CaseStatement:
+        start_pos = self.current_token.position
+        if self.is_identifier('case'):
+            self.advance()
+            value = self.parse_expression()
+            self.expect_operator(':')
+        elif self.is_identifier('default'):
+            self.advance()
+            self.expect_operator(':')
+            value = None
+        else:
+            raise self.error("Expected 'case' or 'default'")
+        
+        statements = []
+        while not (self.is_identifier('case') or self.is_identifier('default') or self.is_operator('}')):
+            statements.append(self.parse_statement())
+        
+        return CaseStatement(value, statements, start_pos, self.current_token.position)
+
     def parse_expression_statement(self) -> ExpressionStatement:
         start_pos = self.current_token.position
         expression = self.parse_expression()
-        self.expect(TokenType.OPERATOR, ';')
+        self.expect_operator(';')
         return ExpressionStatement(expression, start_pos, self.current_token.position)
 
     def parse_expression(self) -> Operand:
@@ -427,7 +496,7 @@ class Parser:
             elif self.is_operator('['):
                 self.advance()
                 index = self.parse_expression()
-                self.expect(TokenType.OPERATOR, ']')
+                self.expect_operator(']')
                 expr = ArrayAccess(expr, index, start_pos, self.current_token.position)
             elif self.is_operator('.'):
                 self.advance()
@@ -457,7 +526,7 @@ class Parser:
         elif self.is_operator('('):
             self.advance()
             expr = self.parse_expression()
-            self.expect(TokenType.OPERATOR, ')')
+            self.expect_operator(')')
         elif self.current_token.type == TokenType.STRING:
             value = self.current_token.value
             self.advance()
@@ -466,66 +535,3 @@ class Parser:
             raise self.error(f"Unexpected token: {self.current_token}")
 
         return expr
-
-    def parse_function_call(self, function: Operand, start_pos: int) -> FunctionCall:
-        self.expect(TokenType.OPERATOR, '(')
-        arguments = []
-        if not self.is_operator(')'):
-            arguments.append(self.parse_expression())
-            while self.is_operator(','):
-                self.advance()
-                arguments.append(self.parse_argument())
-        self.expect(TokenType.OPERATOR, ')')
-        return FunctionCall(function, arguments, start_pos, self.current_token.position)
-
-    def parse_switch_statement(self) -> SwitchStatement:
-        start_pos = self.current_token.position
-        self.expect(TokenType.IDENTIFIER, 'switch')
-        self.expect(TokenType.OPERATOR, '(')
-        expression = self.parse_expression()
-        self.expect(TokenType.OPERATOR, ')')
-        self.expect(TokenType.OPERATOR, '{')
-        cases = []
-        while not self.is_operator('}'):
-            cases.append(self.parse_case_statement())
-        self.expect(TokenType.OPERATOR, '}')
-        return SwitchStatement(expression, cases, start_pos, self.current_token.position)
-    
-    def parse_case_statement(self) -> CaseStatement:
-        start_pos = self.current_token.position
-        if self.is_identifier('case'):
-            self.advance()
-            value = self.parse_expression()
-            self.expect(TokenType.OPERATOR, ':')
-        elif self.is_identifier('default'):
-            self.advance()
-            self.expect(TokenType.OPERATOR, ':')
-            value = None
-        else:
-            raise self.error("Expected 'case' or 'default'")
-        
-        statements = []
-        while not (self.is_identifier('case') or self.is_identifier('default') or self.is_operator('}')):
-            statements.append(self.parse_statement())
-        
-        return CaseStatement(value, statements, start_pos, self.current_token.position)
-
-    def advance(self):
-        self.current_token = self.lexer.next_token()
-        while self.current_token.type in (TokenType.LINE_COMMENT, TokenType.BLOCK_COMMENT):
-            self._comments.append(self.current_token)
-            self.current_token = self.lexer.next_token()
-        self.position = self.current_token.position
-        self._rest = self.lexer.code[self.position:]
-
-    def expect(self, token_type: TokenType, value: Optional[str] = None) -> Token:
-        if self.current_token.type != token_type:
-            raise self.error(f"Expected token type {token_type}, but got {self.current_token.type}")
-        if value is not None and self.current_token.value != value:
-            raise self.error(f"Expected token value '{value}', but got '{self.current_token.value}'")
-        token = self.current_token
-        self.advance()
-        return token
-
-    def error(self, message: str):
-        return ParserException(f"Parser error: {message}")
