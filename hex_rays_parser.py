@@ -1,31 +1,17 @@
-
 from typing import Callable, Optional, List, Self, Tuple, cast
 from enum import Enum, auto
 from abc import ABC, abstractmethod
 
-C_VOID_TYPE = {'void'}
-C_INT_TYPES = {'int', 'char', 'short', 'long', 'long long'}
-C_FLOAT_TYPES = {'float', 'double'}
 MSVC_CALLING_CONVENTIONS = {'__stdcall', '__cdecl', '__fastcall', '__thiscall', '__vectorcall'}
-
 C_DECLARATION_SPECIFIERS = {'static', 'extern', 'auto', 'register', 'const', 'volatile', 'inline', 'unsigned', 'thread_local'}
-
-C_KEYWORDS = { 'if', 'else', 'while', 'for', 'return', 'static', 'const', 
-                      'break', 'continue', 'goto', 'case', 'default', 'switch', 'enum', 'typedef', 'struct', 'union', 'volatile', 
-                      'register', 'auto', 'extern', 'sizeof', 'volatile', 'inline', 'restrict', 'alignas', 'alignof', 
-                      'static_assert'}
-
-C_KEYWORDS |= C_DECLARATION_SPECIFIERS
 
 C_OPERATORS = {'+', '-', '*', '/', '=', '<', '>', '!', '&', '|', '^', '~', ';', '->', '++', '--', '+=', '-=', '*=', 
                '/=', '%=', '&=', '|=', '^=', '<<=', '>>=', '==', '!=', '<=', '>=', '&&', '||', '<<', '>>', '%', '?', 
                ':', '.', ',', '(', ')', '[', ']', '{', '}'}
 # Add the '::' operator to the list of C operators since it can be in the function name in pseudocode
 C_OPERATORS |= {'::'}
-IDA_PSEUDOCODE_OPERATORS = {'LOBYTE', 'HIBYTE', 'WORD', 'DWORD', 'QWORD', 'BYTE'}
 
 class TokenType(Enum):
-    KEYWORD = auto()
     IDENTIFIER = auto()
     NUMBER = auto()
     OPERATOR = auto()
@@ -100,8 +86,6 @@ class Lexer:
             self.advance()
         value: str = self.code[start:self.position]
         
-        if value in C_KEYWORDS:
-            return Token(TokenType.KEYWORD, value, self.line, self.column - (self.position - start), self.position)
         peek = self.peek_next_token()
         while peek.type == TokenType.OPERATOR and peek.value == '::':
             self.operator()
@@ -737,18 +721,6 @@ class LabelStatement(Statement):
     def children(self) -> List[ASTNode]:
         return []
 
-class IDAOperator(Operand):
-    def __init__(self, operator: str, operand: Operand, begin_pos: int, end_pos: int):
-        super().__init__(begin_pos, end_pos)
-        self.operator: str = operator
-        self.operand: Operand = operand
-    
-    def __str__(self):
-        return f"{self.operator}({self.operand})"
-    
-    def children(self) -> List[ASTNode]:
-        return [self.operand]
-
 class CommaOperation(BinaryOperation):
     def __init__(self, left: Operand, right: Operand, begin_pos: int, end_pos: int):
         super().__init__(left, ',', right, begin_pos, end_pos)
@@ -839,7 +811,7 @@ class Parser:
         return specifiers
 
     def is_declaration_specifier(self, token: Token) -> bool:
-        return (token.type == TokenType.KEYWORD and token.value in C_DECLARATION_SPECIFIERS)
+        return token.value in C_DECLARATION_SPECIFIERS
 
     def parse_type(self) -> Type:
         declaration_specifiers = self.parse_declaration_specifiers()
@@ -942,7 +914,7 @@ class Parser:
 
     def parse_return_statement(self) -> ReturnStatement:
         start_pos = self.current_token.position
-        self.expect(TokenType.KEYWORD, 'return')
+        self.expect(TokenType.IDENTIFIER, 'return')
         expression = None
         if self.current_token.type != TokenType.OPERATOR or self.current_token.value != ';':
             expression = self.parse_expression()
@@ -958,7 +930,7 @@ class Parser:
 
     def parse_goto_statement(self) -> GotoStatement:
         start_pos = self.current_token.position
-        self.expect(TokenType.KEYWORD, 'goto')
+        self.expect(TokenType.IDENTIFIER, 'goto')
         label = self.expect(TokenType.IDENTIFIER)
         self.expect(TokenType.OPERATOR, ';')
         return GotoStatement(label.value, start_pos, self.current_token.position)
@@ -1010,20 +982,20 @@ class Parser:
 
     def parse_if_statement(self) -> IfStatement:
         start_pos = self.current_token.position
-        self.expect(TokenType.KEYWORD, 'if')
+        self.expect(TokenType.IDENTIFIER, 'if')
         self.expect(TokenType.OPERATOR, '(')
         condition = self.parse_comma_expression()
         self.expect(TokenType.OPERATOR, ')')
         then_branch = self.parse_statement()
         else_branch = None
-        if self.current_token.type == TokenType.KEYWORD and self.current_token.value == 'else':
+        if self.current_token.type == TokenType.IDENTIFIER and self.current_token.value == 'else':
             self.advance()
             else_branch = self.parse_statement()
         return IfStatement(condition, then_branch, else_branch, start_pos, self.current_token.position)
 
     def parse_while_statement(self) -> WhileStatement:
         start_pos = self.current_token.position
-        self.expect(TokenType.KEYWORD, 'while')
+        self.expect(TokenType.IDENTIFIER, 'while')
         self.expect(TokenType.OPERATOR, '(')
         condition = self.parse_expression()
         self.expect(TokenType.OPERATOR, ')')
@@ -1032,7 +1004,7 @@ class Parser:
 
     def parse_for_statement(self) -> ForStatement:
         start_pos = self.current_token.position
-        self.expect(TokenType.KEYWORD, 'for')
+        self.expect(TokenType.IDENTIFIER, 'for')
         self.expect(TokenType.OPERATOR, '(')
         
         # Parse initializer
@@ -1226,15 +1198,7 @@ class Parser:
         start_pos = self.current_token.position
         expr = None
 
-        if (self.current_token.type == TokenType.IDENTIFIER and 
-            self.current_token.value in IDA_PSEUDOCODE_OPERATORS):
-            operator = self.current_token.value
-            self.advance()
-            self.expect(TokenType.OPERATOR, '(')
-            operand = self.parse_expression()
-            self.expect(TokenType.OPERATOR, ')')
-            expr = IDAOperator(operator, operand, start_pos, self.current_token.position)
-        elif self.current_token.type == TokenType.NUMBER:
+        if self.current_token.type == TokenType.NUMBER:
             value = self.current_token.value
             self.advance()
             expr = Literal(value, start_pos, self.current_token.position)
@@ -1268,7 +1232,7 @@ class Parser:
 
     def parse_switch_statement(self) -> SwitchStatement:
         start_pos = self.current_token.position
-        self.expect(TokenType.KEYWORD, 'switch')
+        self.expect(TokenType.IDENTIFIER, 'switch')
         self.expect(TokenType.OPERATOR, '(')
         expression = self.parse_expression()
         self.expect(TokenType.OPERATOR, ')')
@@ -1277,7 +1241,7 @@ class Parser:
 
     def parse_case_statement(self) -> CaseStatement:
         start_pos = self.current_token.position
-        self.expect(TokenType.KEYWORD, 'case')
+        self.expect(TokenType.IDENTIFIER, 'case')
         value = self.parse_expression()
         self.expect(TokenType.OPERATOR, ':')
         statement = self.parse_statement()
@@ -1285,7 +1249,7 @@ class Parser:
 
     def parse_default_statement(self) -> CaseStatement:
         start_pos = self.current_token.position
-        self.expect(TokenType.KEYWORD, 'default')
+        self.expect(TokenType.IDENTIFIER, 'default')
         self.expect(TokenType.OPERATOR, ':')
         statement = self.parse_statement()
         return CaseStatement(None, statement, start_pos, self.current_token.position)
