@@ -519,6 +519,20 @@ class ReturnStatement(Statement):
     def children(self) -> List[ASTNode]:
         return [self.expression] if self.expression else []
 
+class BreakStatement(Statement):
+    def __init__(self, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
+
+    def __str__(self):
+        return "break;"
+
+class ContinueStatement(Statement):
+    def __init__(self, begin_pos: int, end_pos: int):
+        super().__init__(begin_pos, end_pos)
+
+    def __str__(self):
+        return "continue;"
+
 class BinaryOperation(Operand):
     def __init__(self, left: Operand, operator: str, right: Operand, begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
@@ -904,8 +918,12 @@ class Parser:
             return self.parse_case_statement()
         elif self.current_token.value == 'default':
             return self.parse_default_statement()
+        elif self.current_token.value == 'break':
+            return self.parse_break_statement()
         elif self.current_token.type == TokenType.OPERATOR and self.current_token.value == '{':
             return self.parse_compound_statement()
+        elif self.current_token.value == 'continue':
+            return self.parse_continue_statement()
         elif self.is_variable_declaration():
             return self.parse_variable_declaration()
         elif self.is_function_declaration():
@@ -916,6 +934,18 @@ class Parser:
             return self.parse_label_statement()
         else:
             return self.parse_expression_statement()
+
+    def parse_break_statement(self) -> BreakStatement:
+        start_pos = self.current_token.position
+        self.expect(TokenType.KEYWORD, 'break')
+        self.expect(TokenType.OPERATOR, ';')
+        return BreakStatement(start_pos, self.current_token.position)
+    
+    def parse_continue_statement(self) -> ContinueStatement:
+        start_pos = self.current_token.position
+        self.expect(TokenType.KEYWORD, 'continue')
+        self.expect(TokenType.OPERATOR, ';')
+        return ContinueStatement(start_pos, self.current_token.position)
 
     def parse_goto_statement(self) -> GotoStatement:
         start_pos = self.current_token.position
