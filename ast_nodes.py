@@ -49,13 +49,13 @@ class ASTNode(ABC):
         dfs(self)
         return nodes
     
-    def transform(self, transformation: Callable[['ASTNode'], Optional['ASTNode']]) -> None:
+    def transform(self, transformation: Callable[['ASTNode'], Optional['ASTNode']]) -> 'ASTNode':
         def dfs(node: ASTNode) -> Optional[ASTNode]:
             result = transformation(node)
             if result is not None:
                 return result
             
-            for i, child in enumerate(node.children()):
+            for child in node.children():
                 new_child = dfs(child)
                 if new_child is not None and new_child is not child:
                     node.replace_child(child, new_child)
@@ -63,6 +63,7 @@ class ASTNode(ABC):
             return None
         
         dfs(self)
+        return self
 
 class Statement(ASTNode):
     def __init__(self, begin_pos: int, end_pos: int):
