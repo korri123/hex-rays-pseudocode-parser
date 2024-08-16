@@ -155,3 +155,4 @@ cython_debug/
 
 # cpp files
 *.cpp
+test.py
