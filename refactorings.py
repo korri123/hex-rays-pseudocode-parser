@@ -4,14 +4,15 @@ from ast_nodes import ASTNode, FunctionCall, FunctionDeclaration, Identifier, Me
 
 # void __thiscall function(void* this) -> void function()
 # void __cdecl function() -> void function()
-def remove_calling_convention(node: ASTNode) -> Optional[ASTNode]:
-    if isinstance(node, FunctionDeclaration):
-        calling_convention = node.calling_convention
-        if calling_convention == '__thiscall' and node.parameters:
-            node.parameters = node.parameters[1:]
-        node.calling_convention = None
-        return node
-    return None
+def remove_calling_convention(head: ASTNode):
+    for node in head.as_flat_list():
+        if isinstance(node, FunctionDeclaration):
+            calling_convention = node.calling_convention
+            if calling_convention == '__thiscall' and node.parameters:
+                node.parameters = node.parameters[1:]
+            node.calling_convention = None
+            break
+
 
 # object->vtbl->function(object) -> object->function()
 def remove_vtbl_and_first_arg(node: ASTNode) -> Optional[ASTNode]:
@@ -54,16 +55,20 @@ def inline_comma_assignment(node: ASTNode) -> Optional[ASTNode]:
                 return new_right
     return None
 
+
+def join_variable_assignments(head: ASTNode):
+    variables = [var for var in head.get_variable_declarations() if not var.has_initializer()]
+    
+    
 def apply_refactorings(ast: ASTNode) -> ASTNode:
+    ast.transform(remove_vtbl_and_first_arg)
+    ast.transform(remove_data_arrow)
+    remove_calling_convention(ast)
     # Apply the transformations to the AST
     while True:
         ast_before = str(ast)
-        ast.transform(remove_vtbl_and_first_arg)
-        ast.transform(remove_data_arrow)
         ast.transform(inline_comma_assignment)
-        ast.transform(remove_calling_convention)
         ast_after = str(ast)
-        
         if ast_before == ast_after:
             break
     return ast

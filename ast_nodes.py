@@ -14,14 +14,43 @@ class ASTNode(ABC):
     def children(self) -> List['ASTNode']:
         pass
 
+    def remove_child(self, child: 'ASTNode') -> None:
+        for key, value in self.__dict__.items():
+            if value is child:
+                value.parent = None
+                self.__dict__[key] = None
+                break
+        else:
+            raise ValueError(f"Child '{child}' not found")
+    
+    def remove_me(self) -> None:
+        if self.parent:
+            self.parent.remove_child(self)
+        else:
+            raise ValueError("Node has no parent")
+        
+    def as_flat_list(self) -> List['ASTNode']:
+        result = []
+        def dfs(node: 'ASTNode'):
+            result.append(node)
+            for child in node.children():
+                dfs(child)
+        dfs(self)
+        return result
+    
     def replace_child(self, old_child: 'ASTNode', new_child: 'ASTNode'):
         for key, value in self.__dict__.items():
             if value is old_child:
                 self.__dict__[key] = new_child
                 break
         else:
-            raise ValueError(f"Child {old_child} not found")
+            raise ValueError(f"Child '{old_child}' not found")
         new_child.parent = self
+
+    def replace_me(self, new_child: 'ASTNode'):
+        if self.parent is None:
+            raise ValueError("Node has no parent")
+        self.parent.replace_child(self, new_child)
 
     def replace_child_at_index(self, index: int, new_child: 'ASTNode'):
         old_child = self.children()[index]
@@ -48,6 +77,15 @@ class ASTNode(ABC):
                 dfs(child)
         dfs(self)
         return nodes
+    
+    def find_child(self, predicate: Callable[['ASTNode'], bool]) -> Optional['ASTNode']:
+        for child in self.children():
+            if predicate(child):
+                return child
+        return None
+    
+    def get_variable_declarations(self) -> List['VariableDeclaration']:
+        return cast(List['VariableDeclaration'], self.find_nodes(lambda node: isinstance(node, VariableDeclaration)))
     
     def transform(self, transformation: Callable[['ASTNode'], Optional['ASTNode']]) -> 'ASTNode':
         def dfs(node: ASTNode) -> Optional[ASTNode]:
@@ -78,15 +116,18 @@ class Program(ASTNode):
         self.statements: List[Statement] = statements
         self.comments: List[Token] = comments
     
-    def replace_child(self, old_child: ASTNode, new_child: ASTNode):
+    def replace_child(self, old_child: Statement, new_child: Statement):
         if not isinstance(new_child, Statement):
-            raise ValueError(f"New child {new_child} is not a Statement")  
+            raise ValueError(f"New child '{new_child}' is not a Statement")  
         try:
-            index = self.statements.index(cast(Statement, old_child))
-            self.statements[index] = cast(Statement, new_child)
+            index = self.statements.index(old_child)
+            self.statements[index] = new_child
             new_child.parent = self
         except ValueError:
-            raise ValueError(f"Child {old_child} not found")
+            raise ValueError(f"Child '{old_child}' not found")
+        
+    def remove_child(self, child: Statement):
+        self.statements.remove(child)
 
     def __str__(self):
         result = self._get_declarations_string()
@@ -135,8 +176,8 @@ class Program(ASTNode):
             comment_index += 1
         return result
 
-    def children(self) -> List[ASTNode]:
-        return cast(List[ASTNode], self.statements.copy())
+    def children(self) -> List[Statement]:
+        return self.statements.copy()
 
 class Type(ASTNode):
     def __init__(self, name: str, specifiers: List[str], pointer_count: Optional[int], begin_pos: int, end_pos: int):
@@ -162,15 +203,18 @@ class CompoundStatement(Statement):
         super().__init__(begin_pos, end_pos)
         self.statements: List[Statement] = statements
 
-    def replace_child(self, old_child: ASTNode, new_child: ASTNode):
+    def replace_child(self, old_child: Statement, new_child: Statement):
         if not isinstance(new_child, Statement):
-            raise ValueError(f"New child {new_child} is not a Statement")
+            raise ValueError(f"New child '{new_child}' is not a Statement")
         try:
-            index = self.statements.index(cast(Statement, old_child))
-            self.statements[index] = cast(Statement, new_child)
+            index = self.statements.index(old_child)
+            self.statements[index] = new_child
             new_child.parent = self
         except ValueError:
-            raise ValueError(f"Child {old_child} not found")
+            raise ValueError(f"Child '{old_child}' not found")
+        
+    def remove_child(self, child: Statement):
+        self.statements.remove(child)
     
     def __str__(self):
         stmt_strs = []
@@ -183,8 +227,8 @@ class CompoundStatement(Statement):
         NEW_LINE = '\n'
         return f"{{\n{NEW_LINE.join(stmt_strs)}\n}}"
 
-    def children(self) -> List[ASTNode]:
-        return cast(List[ASTNode], self.statements.copy())
+    def children(self) -> List[Statement]:
+        return self.statements.copy()
 
 class Parameter(ASTNode):
     def __init__(self, type: Type, name: str, begin_pos: int, end_pos: int):
@@ -209,7 +253,7 @@ class FunctionDeclaration(Statement):
 
     def replace_child(self, old_child: ASTNode, new_child: ASTNode):
         if not isinstance(new_child, Parameter) and isinstance(old_child, Parameter):
-            raise ValueError(f"New child {new_child} is not a Parameter")
+            raise ValueError(f"New child '{new_child}' is not a Parameter")
         try:
             index = self.parameters.index(cast(Parameter, old_child))
             self.parameters[index] = cast(Parameter, new_child)
@@ -219,6 +263,12 @@ class FunctionDeclaration(Statement):
             pass
         super().replace_child(old_child, new_child)
     
+    def remove_child(self, child: ASTNode):
+        if child in self.parameters:
+            self.parameters.remove(child)
+        else:
+            super().remove_child(child)
+
     def __str__(self):
         params = ', '.join(str(param) for param in self.parameters)
         result = str(self.return_type)
@@ -486,6 +536,9 @@ class Identifier(Operand):
     
     def children(self) -> List[ASTNode]:
         return []
+    
+    def get_references(self, head: ASTNode):
+        return head.find_nodes(lambda node: isinstance(node, Identifier) and node.name == self.name and node is not self)
 
 class FunctionCall(Operand):
     def __init__(self, function: Operand, arguments: List[Operand], begin_pos: int, end_pos: int):
@@ -507,7 +560,7 @@ class FunctionCall(Operand):
     
     def replace_child(self, old_child: ASTNode, new_child: ASTNode):
         if not isinstance(new_child, Operand):
-            raise ValueError(f"New child {new_child} is not an Operand")
+            raise ValueError(f"New child '{new_child}' is not an Operand")
         try:
             arg = self.arguments.index(cast(Operand, old_child))
             self.arguments[arg] = cast(Operand, new_child)
@@ -517,12 +570,21 @@ class FunctionCall(Operand):
             pass
         super().replace_child(old_child, new_child)
 
+    def remove_child(self, child: ASTNode):
+        if child in self.arguments:
+            self.arguments.remove(child)
+        else:
+            super().remove_child(child)
+
 class VariableDeclaration(Statement):
     def __init__(self, type: Type, name: str, initializer: Optional[Operand], begin_pos: int, end_pos: int):
         super().__init__(begin_pos, end_pos)
         self.type: Type = type
         self.name: str = name
         self.initializer: Optional[Operand] = initializer
+
+    def has_initializer(self):
+        return self.initializer is not None
     
     def __str__(self):
         if self.initializer:
@@ -534,6 +596,10 @@ class VariableDeclaration(Statement):
         if self.initializer:
             children.append(self.initializer)
         return children
+    
+    def get_references(self, head: ASTNode):
+        return head.find_nodes(lambda node: isinstance(node, Identifier) and node.name == self.name)
+
 
 class GotoStatement(Statement):
     def __init__(self, label: str, begin_pos: int, end_pos: int):
@@ -564,8 +630,8 @@ class CommaOperation(BinaryOperation):
     def __str__(self):
         return f"{self.left}, {self.right}"
     
-    def children(self) -> List[ASTNode]:
-        return cast(List[ASTNode], [self.left, self.right])
+    def children(self) -> List[Operand]:
+        return [self.left, self.right]
 
 class SwitchStatement(Statement):
     def __init__(self, expression: Operand, cases: List['CaseStatement'], begin_pos: int, end_pos: int):
